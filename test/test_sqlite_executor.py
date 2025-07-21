@@ -95,8 +95,7 @@ def test_timeout_returns_none(executor: SqliteDBExecutor):
                                       UNION ALL
                                       SELECT n + 1
                                       FROM cnt
-                                      WHERE n < 10_000_000
-            )
+                                      WHERE n < 10_000_000)
             SELECT AVG(n)
             FROM cnt;
             """
@@ -117,8 +116,7 @@ def test_multiple_timeout(executor: SqliteDBExecutor):
                                       UNION ALL
                                       SELECT n + 1
                                       FROM cnt
-                                      WHERE n < 10_000_000
-            )
+                                      WHERE n < 10_000_000)
             SELECT SUM(n)
             FROM cnt;
             """
@@ -129,6 +127,30 @@ def test_multiple_timeout(executor: SqliteDBExecutor):
     )
     print(out)
     assert all(r is None for r in out)
+
+
+def test_multi_thread_is_faster(executor: SqliteDBExecutor):
+    query = """
+            -- Recursively count to ten million, then aggregate
+            WITH RECURSIVE cnt(n) AS (SELECT 1
+                                      UNION ALL
+                                      SELECT n + 1
+                                      FROM cnt
+                                      WHERE n < 100_000)
+            SELECT SUM(n)
+            FROM cnt; \
+            """
+
+    queries = [query] * 10
+    timer = Timer()
+    _ = executor.execute_multiple_query(queries, max_thread_num=15)
+    elapsed = timer.elapsed()
+    timer = Timer()
+    for query in queries:
+        _ = executor.execute_query(query)
+    elapsed_single = timer.elapsed()
+    assert elapsed < elapsed_single
+    print(f"Multi-threaded execution took {elapsed:.2f}s, single-threaded took {elapsed_single:.2f}")
 
 
 def test_bad_sql_resilient(executor: SqliteDBExecutor):
