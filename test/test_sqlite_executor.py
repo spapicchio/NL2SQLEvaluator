@@ -50,9 +50,7 @@ def test_execute_query_simple(executor: SqliteDBExecutor):
 
 def test_execute_query_param(executor: SqliteDBExecutor):
     """Verify that bound parameters work."""
-    res = executor.execute_query(
-        "SELECT COUNT(*) FROM Airlines WHERE TAIL_NUM=:num", params={"num": 'N956AN'}
-    )
+    res = executor.execute_query("SELECT COUNT(*) FROM Airlines WHERE TAIL_NUM=:num", params={"num": 'N956AN'})
     assert res == [(98,)]
 
 
@@ -81,7 +79,7 @@ def test_many_concurrent_reads_no_deadlock(executor: SqliteDBExecutor):
     """
     queries = ["SELECT COUNT(*) FROM Airlines"] * 1000
     timer = Timer()
-    executor.execute_multiple_query(queries, max_thread_num=40, timeout=5)
+    executor.execute_multiple_query(queries, max_thread_num=40)
     assert timer.elapsed() < 5.0
 
 
@@ -90,6 +88,7 @@ def test_timeout_returns_none(executor: SqliteDBExecutor):
     A slow query that sleeps 0.2 s but has a 0.1 s timeout
     must come back as None, not raise.
     """
+    executor.set_different_timeout(0.001)
     query = """
             -- Recursively count to ten million, then aggregate
             WITH RECURSIVE cnt(n) AS (SELECT 1
@@ -102,7 +101,7 @@ def test_timeout_returns_none(executor: SqliteDBExecutor):
             FROM cnt;
             """
     for _ in range(10):
-        res = executor.execute_query(query, timeout=10e-5)
+        res = executor.execute_query(query)
         assert res is None
 
 
@@ -111,6 +110,7 @@ def test_multiple_timeout(executor: SqliteDBExecutor):
     Ten slow queries in parallel, each exceeding its own timeout,
     must all return None.
     """
+    executor.set_different_timeout(0.001)
     query = """
             -- Recursively count to ten million, then aggregate
             WITH RECURSIVE cnt(n) AS (SELECT 1

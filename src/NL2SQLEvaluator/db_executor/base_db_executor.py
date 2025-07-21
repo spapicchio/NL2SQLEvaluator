@@ -14,9 +14,14 @@ from NL2SQLEvaluator.logger import get_logger
 
 
 class BaseSQLDBExecutor(ABC):
-    def __init__(self, engine: Engine, cache_db: Optional[BaseCacheDB], logger: Optional[logging.Logger] = None,
+    def __init__(self,
+                 engine: Engine,
+                 cache_db: Optional[BaseCacheDB],
+                 logger: Optional[logging.Logger] = None,
+                 timeout: Optional[int | float] = 400,
                  *args,
                  **kwargs):
+        self.timeout = timeout
         self.engine = engine
         self.cache_db = cache_db
         self.logger = logger or get_logger(name=__name__, level="INFO")
