@@ -29,3 +29,9 @@ def test_get_from_cache(executor: MySQLCache):
     # Retrieve data from cache
     result = executor.get_from_cache(uri, query)
     assert result == [("row1_col1", "row1_col2"), ("row2_col1", "row2_col2")]
+
+
+
+def test_timeout():
+    executor = MySQLCache.from_uri(port=3307, timeout=0.001)
+    assert executor is None
