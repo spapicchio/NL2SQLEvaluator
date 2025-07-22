@@ -6,10 +6,6 @@ import pytest
 from NL2SQLEvaluator.db_executor.sqlite_executor import SqliteDBExecutor
 
 
-def py_sleep(seconds):
-    time.sleep(float(seconds))
-
-
 # ---------------------------------------------------------------------------
 # 1.  Fixtures
 # ---------------------------------------------------------------------------
