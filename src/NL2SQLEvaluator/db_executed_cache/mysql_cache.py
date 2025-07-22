@@ -1,15 +1,14 @@
 import hashlib
-import json
 import logging
 import pickle
-from typing import Iterable, Optional
+from typing import Optional
 
+import sqlalchemy
 from sqlalchemy import Column, String, func, insert, select, create_engine
 from sqlalchemy.dialects.mysql import LONGTEXT, LONGBLOB
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import DeclarativeBase, Session
-
 from sqlalchemy.types import TypeDecorator
-
 
 from NL2SQLEvaluator.logger import get_logger
 
@@ -55,12 +54,12 @@ class CachedData(Base):
 
 class MySQLCache:
     def __init__(
-        self,
-        engine,
-        logger: Optional[logging.Logger] = None,
-        timeout: Optional[int | float] = 400,
-        *args,
-        **kwargs,
+            self,
+            engine,
+            logger: Optional[logging.Logger] = None,
+            timeout: Optional[int | float] = 100,
+            *args,
+            **kwargs,
     ):
         self.timeout = timeout
         self.engine = engine
@@ -69,7 +68,7 @@ class MySQLCache:
         self.engine_url = str(engine.url)
 
     @classmethod
-    def from_uri(cls, *args, **kwargs) -> "MySQLCache":
+    def from_uri(cls, *args, **kwargs) -> Optional["MySQLCache"]:
         # https://docs.sqlalchemy.org/en/20/core/engines.html
         # Remove Decimal and NewDecimal types from pymysql converters
         # this is necessry for compression otherwise it is
@@ -81,30 +80,48 @@ class MySQLCache:
         port = kwargs.get("port", 3306)
         db_name = kwargs.get("db_name", "cache")
         host = kwargs.get("host", "localhost")
-
-        return cls(
-            create_engine(
-                f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}",
-                connect_args={
-                    # "conv": conv,
-                    "connect_timeout": 120,
-                    "read_timeout": 120,
-                    "write_timeout": 120,
-                    "charset": "utf8mb4",
-                    "autocommit": True,
-                },
-                echo=True,
-            )
+        logger = kwargs.get("logger", get_logger(name=__name__, level="ERROR"))
+        timeout = kwargs.get("timeout", 100)
+        url = f"mysql+pymysql://{user}:{password}@{host}:{port}/{db_name}"
+        logger.info(
+            f"Connecting to MySQL database for cache uri: `{url}`, timeout: {timeout} seconds"
         )
+        try:
+            return cls(
+                engine=create_engine(
+                    url,
+                    connect_args={
+                        # "conv": conv,
+                        "connect_timeout": 120,
+                        "read_timeout": timeout,
+                        "write_timeout": timeout,
+                        "charset": "utf8mb4",
+                        "autocommit": True,
+                    },
+                    echo=True,
+                ),
+                logger=logger,
+            )
+        except sqlalchemy.exc.OperationalError as e:
+            logger.error(
+                f"Failed to connect to MySQL database: {url}, returning None. Error: {e}"
+            )
+            return None
 
-    def get_from_cache(self, uri, query: str) -> list[list] | None:
+    def get_from_cache(self, uri, query: str) -> list[tuple] | None:
         """Retrieve the result of a query from the cache."""
         hash_id = hash_db_id_sql(uri, query)
         self.logger.debug(f"Fetching from cache with hash_id: {hash_id}")
-        with Session(self.engine) as session:
-            stmt = select(CachedData.result).where(CachedData.hash_key == hash_id)
-            result = session.execute(stmt).scalars().first()
-        return pickle.loads(result) if result else None
+        try:
+            with Session(self.engine) as session:
+                stmt = select(CachedData.result).where(CachedData.hash_key == hash_id)
+                result = session.execute(stmt).scalars().first()
+            return pickle.loads(result) if result else None
+        except OperationalError as e:
+            self.logger.error(
+                f"Failed to retrieve from cache for `{uri}`, `{query}`, error: {e}"
+            )
+            return None
 
     def insert_in_cache(self, uri, query: str, result: list) -> None:
         """Insert the result of a query into the cache."""
@@ -120,9 +137,14 @@ class MySQLCache:
             .prefix_with("IGNORE")
             .values(hash_key=hash_id, uri=uri, query=query, result=pickled_result)
         )
-        with Session(self.engine) as session:
-            session.execute(stmt)
-            session.commit()
+        try:
+            with Session(self.engine) as session:
+                session.execute(stmt)
+                session.commit()
+        except OperationalError as e:
+            self.logger.error(
+                f"Failed to insert into cache for `{uri}`, `{query}`, error: {e}"
+            )
 
 
 if __name__ == "__main__":

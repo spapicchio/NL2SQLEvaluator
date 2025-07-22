@@ -111,7 +111,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
             f"Executing multiple {len(queries)} queries concurrently with max_thread_num={max_thread_num} and timeout={self.timeout}"
         )
         self.logger.debug(
-            f"Number of queries= {len(queries)}"
+            f"Number of queries={len(queries)}"
         )
         start = time.time()
         params = params or [None] * len(queries)

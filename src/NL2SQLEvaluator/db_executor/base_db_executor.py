@@ -9,7 +9,7 @@ from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
 from sqlalchemy.sql.sqltypes import NullType
 
-from NL2SQLEvaluator.db_executed_cache.mysql_cache import MySQLCache
+from NL2SQLEvaluator.db_executed_cache import MySQLCache
 from NL2SQLEvaluator.logger import get_logger
 
 
