@@ -9,14 +9,14 @@ from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
 from sqlalchemy.sql.sqltypes import NullType
 
-from NL2SQLEvaluator.db_executed_cache.cache_db import BaseCacheDB
+from NL2SQLEvaluator.db_executed_cache.mysql_cache import MySQLCache
 from NL2SQLEvaluator.logger import get_logger
 
 
 class BaseSQLDBExecutor(ABC):
     def __init__(self,
                  engine: Engine,
-                 cache_db: Optional[BaseCacheDB],
+                 cache_db: Optional[MySQLCache] = None,
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
                  *args,
@@ -34,6 +34,29 @@ class BaseSQLDBExecutor(ABC):
     def from_uri(cls, *args, **kwargs) -> "BaseSQLDBExecutor":
         # https://docs.sqlalchemy.org/en/20/core/engines.html
         raise NotImplementedError("This method should be implemented by subclasses")
+
+    def execute_query_and_cache(self,
+                                query: str | sql.Executable,
+                                params: Optional[list[tuple]] = None,
+                                throw_if_error: bool = False,
+                                *args, **kwargs) -> list[tuple]:
+        if self.cache_db is None:
+            self.logger.debug(
+                "Cache database is not set. Cannot execute query with caching. Executing without cache."
+            )
+            return self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
+
+        # Check if the query result is already cached
+        cached_result = self.cache_db.get_from_cache(self.engine_url, str(query))
+        if cached_result is not None:
+            return cached_result
+
+        self.logger.debug("Query not found in cache, executing query.")
+        result = self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
+        if result is not None:
+            self.cache_db.insert_in_cache(self.engine_url, str(query), result)
+            self.logger.debug("Query cached in cache database.")
+        return result
 
     @abstractmethod
     def execute_query(
