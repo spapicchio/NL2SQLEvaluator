@@ -1,0 +1,38 @@
+{
+  "name": "CUDA 12",
+  "build": {
+    "dockerfile": "./Dockerfile",
+    "context": ".."
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "installZsh": true,
+      "configureZshAsDefaultShell": true
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "cweijan.vscode-mysql-client2"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python3"
+      }
+    }
+  },
+  "runArgs": [
+    "--gpus",
+    "all",
+    "--shm-size=128g",
+    "--ipc=host",
+    "--network=host"
+  ],
+  "mounts": [
+    "source=/home/papicchi/.cache/huggingface,target=/hf_cache,type=bind"
+  ],
+  "postStartCommand": "uv sync --frozen; bash -c 'source .devcontainer/set_up_mysql.sh'",
+  "forwardPorts": [3306]
+}
