@@ -17,7 +17,7 @@ class Value:
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             return abs(float(a) - float(b)) <= self.epsilon
 
-        return a == b
+        return str(a) == str(b)
 
     def __hash__(self):
         if isinstance(self.raw, (int, float)):
@@ -25,3 +25,17 @@ class Value:
             rounded = round(float(self.raw), precision)
             return hash(rounded)
         return hash(self.raw)
+
+
+def sort_with_different_types(arr: tuple[Value, ...]) -> tuple[Value, ...]:
+    return tuple(sorted(arr, key=sort_key))
+
+
+def sort_key(x: Value):
+    raw = x.raw
+    if raw is None:
+        return 0, ''
+    elif isinstance(raw, (int, float)):
+        return 1, float(raw)
+    else:
+        return 2, str(raw)

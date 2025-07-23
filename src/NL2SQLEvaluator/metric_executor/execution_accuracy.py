@@ -1,6 +1,6 @@
 from langgraph.func import task
 
-from NL2SQLEvaluator.metric_executor.utils_value import Value
+from NL2SQLEvaluator.metric_executor.utils_value import Value, sort_with_different_types
 
 
 @task
@@ -23,15 +23,3 @@ def worker_execution_accuracy(
     return float(gold_row_set == pred_row_set)
 
 
-def sort_with_different_types(arr: tuple[Value, ...]) -> tuple[Value, ...]:
-    return tuple(sorted(arr, key=sort_key))
-
-
-def sort_key(x: Value):
-    raw = x.raw
-    if raw is None:
-        return 0, ''
-    elif isinstance(raw, (int, float)):
-        return 1, float(raw)
-    else:
-        return 2, str(raw)
