@@ -66,7 +66,7 @@ class BaseSQLDBExecutor(ABC):
         if self.dialect == "mysql":
             return str(self.engine.url).strip("/")[-1]
         elif self.dialect == "sqlite":
-            return str(self.engine.url).split("/")[-1].split("?")[0]
+            return str(self.engine.url).split("/")[-1].split("?")[0].split(".")[0]
         else:
             raise ValueError(
                 f"Unsupported dialect: {self.dialect}. Cannot determine db_id."
@@ -130,11 +130,6 @@ class BaseSQLDBExecutor(ABC):
         with self.engine.connect() as conn:
             self.metadata.reflect(bind=conn)
         return self.metadata
-
-    @property
-    def dialect(self) -> str:
-        """Return string representation of dialect to use."""
-        return self.engine.dialect.name
 
     @property
     def inspector(self):

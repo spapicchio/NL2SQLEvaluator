@@ -117,7 +117,7 @@ class MySQLCache:
             with Session(self.engine) as session:
                 stmt = select(CachedData.result).where(CachedData.hash_key == hash_id)
                 result_row = session.execute(stmt).scalars().first()
-            return pickle.loads(result_row.result) if result_row else None
+            return pickle.loads(result_row) if result_row else None
         except OperationalError as e:
             self.logger.error(
                 f"Failed to retrieve from cache for `{db_id}`, `{query}`, error: {e}"
