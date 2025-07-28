@@ -13,8 +13,8 @@ from sqlalchemy.types import TypeDecorator
 from NL2SQLEvaluator.logger import get_logger
 
 
-def hash_db_id_sql(uri, query) -> str:
-    value = f"{uri}|{query}"
+def hash_db_id_sql(db_id, query) -> str:
+    value = f"{db_id}|{query}"
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
@@ -44,12 +44,12 @@ class CachedData(Base):
         String(64), primary_key=True, index=True
     )  # 64 hex chars from SHA‑256
 
-    uri = Column(String(1000), nullable=False)
+    db_id = Column(String(1500), nullable=False)
     query = Column(LONGTEXT, nullable=False)
     result = Column(CompressedJSON, nullable=True)
 
     def __repr__(self):
-        return f"CachedData(hash_key={self.hash_key!r}, uri={self.uri!r}, query={self.query!r}, result={self.result!r})"
+        return f"CachedData(hash_key={self.hash_key!r}, db_id={self.db_id!r}, query={self.query!r}, result={self.result!r})"
 
 
 class MySQLCache:
@@ -86,6 +86,7 @@ class MySQLCache:
         logger.info(
             f"Connecting to MySQL database for cache uri: `{url}`, timeout: {timeout} seconds"
         )
+        is_echo = kwargs.get("is_echo", False)
         try:
             return cls(
                 engine=create_engine(
@@ -98,7 +99,7 @@ class MySQLCache:
                         "charset": "utf8mb4",
                         "autocommit": True,
                     },
-                    echo=True,
+                    echo=is_echo,
                 ),
                 logger=logger,
             )
@@ -108,34 +109,34 @@ class MySQLCache:
             )
             return None
 
-    def get_from_cache(self, uri, query: str) -> list[tuple] | None:
+    def get_from_cache(self, db_id, query: str) -> list[tuple] | None:
         """Retrieve the result of a query from the cache."""
-        hash_id = hash_db_id_sql(uri, query)
+        hash_id = hash_db_id_sql(db_id, query)
         self.logger.debug(f"Fetching from cache with hash_id: {hash_id}")
         try:
             with Session(self.engine) as session:
                 stmt = select(CachedData.result).where(CachedData.hash_key == hash_id)
-                result = session.execute(stmt).scalars().first()
-            return pickle.loads(result) if result else None
+                result_row = session.execute(stmt).scalars().first()
+            return pickle.loads(result_row.result) if result_row else None
         except OperationalError as e:
             self.logger.error(
-                f"Failed to retrieve from cache for `{uri}`, `{query}`, error: {e}"
+                f"Failed to retrieve from cache for `{db_id}`, `{query}`, error: {e}"
             )
             return None
 
-    def insert_in_cache(self, uri, query: str, result: list) -> None:
+    def insert_in_cache(self, db_id, query: str, result: list) -> None:
         """Insert the result of a query into the cache."""
-        hash_id = hash_db_id_sql(uri, query)
+        hash_id = hash_db_id_sql(db_id, query)
         self.logger.debug(
             f"Inserting (or Ignore if duplicate) in cache with hash_id: {hash_id}"
         )
 
         pickled_result = pickle.dumps(result)
-        hash_id = hash_db_id_sql(uri, query)
+        hash_id = hash_db_id_sql(db_id, query)
         stmt = (
             insert(CachedData)
             .prefix_with("IGNORE")
-            .values(hash_key=hash_id, uri=uri, query=query, result=pickled_result)
+            .values(hash_key=hash_id, db_id=db_id, query=query, result=pickled_result)
         )
         try:
             with Session(self.engine) as session:
@@ -143,7 +144,7 @@ class MySQLCache:
                 session.commit()
         except OperationalError as e:
             self.logger.error(
-                f"Failed to insert into cache for `{uri}`, `{query}`, error: {e}"
+                f"Failed to insert into cache for `{db_id}`, `{query}`, error: {e}"
             )
 
 

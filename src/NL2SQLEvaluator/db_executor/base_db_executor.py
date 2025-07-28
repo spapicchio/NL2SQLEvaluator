@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from sqlite3 import ProgrammingError
 from typing import Optional, Literal
 
+from langgraph.func import task
 from sqlalchemy import Engine, inspect, Table, insert, select, MetaData
 from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
@@ -11,6 +12,30 @@ from sqlalchemy.sql.sqltypes import NullType
 
 from NL2SQLEvaluator.db_executed_cache import MySQLCache
 from NL2SQLEvaluator.logger import get_logger
+from NL2SQLEvaluator.task_definition import SingleTask, SQLTask
+
+
+@task()
+def db_executor_worker(single_task: SingleTask) -> SingleTask:
+    """
+    Worker function to execute SQL queries in a batch.
+    """
+    engine = single_task.engine
+
+    executed_target = engine.execute_query_and_cache(single_task.target_sql.query) \
+        if single_task.target_sql.executed is None else single_task.target_sql.executed
+
+    executed_predicted = engine.execute_query_and_cache(single_task.predicted_sql.query) \
+        if single_task.predicted_sql.executed is None else single_task.predicted_sql.executed
+
+    target = SQLTask(query=single_task.target_sql.query, executed=executed_target)
+    predicted = SQLTask(query=single_task.predicted_sql.query, executed=executed_predicted)
+
+    return SingleTask(
+        target_sql=target,
+        predicted_sql=predicted,
+        **single_task.model_dump(exclude={"target_sql", "predicted_sql"})
+    )
 
 
 class BaseSQLDBExecutor(ABC):
@@ -28,6 +53,24 @@ class BaseSQLDBExecutor(ABC):
         self.metadata = MetaData()
         self._reflect()
         self.engine_url = str(engine.url)
+        if not self.table_names:
+            self.logger.error(f"No tables found in database at {self.engine_url}.")
+
+    @property
+    def dialect(self) -> str:
+        """Return string representation of dialect to use."""
+        return self.engine.dialect.name
+
+    @property
+    def db_id(self) -> str:
+        if self.dialect == "mysql":
+            return str(self.engine.url).strip("/")[-1]
+        elif self.dialect == "sqlite":
+            return str(self.engine.url).split("/")[-1].split("?")[0]
+        else:
+            raise ValueError(
+                f"Unsupported dialect: {self.dialect}. Cannot determine db_id."
+            )
 
     @classmethod
     @abstractmethod
@@ -47,14 +90,14 @@ class BaseSQLDBExecutor(ABC):
             return self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
 
         # Check if the query result is already cached
-        cached_result = self.cache_db.get_from_cache(self.engine_url, str(query))
+        cached_result = self.cache_db.get_from_cache(self.db_id, str(query))
         if cached_result is not None:
             return cached_result
 
         self.logger.debug("Query not found in cache, executing query.")
         result = self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
         if result is not None:
-            self.cache_db.insert_in_cache(self.engine_url, str(query), result)
+            self.cache_db.insert_in_cache(self.db_id, str(query), result)
             self.logger.debug("Query cached in cache database.")
         return result
 
@@ -128,7 +171,7 @@ class BaseSQLDBExecutor(ABC):
                     table._columns.remove(v)
             with self.engine.connect() as conn:
                 create_table = str(
-                    CreateTable(table).compile(dialect=conn.bind.dialect)
+                    CreateTable(table).compile(dialect=conn.dialect)
                 )
                 table_info = f"{create_table.rstrip()}"
 
@@ -192,7 +235,7 @@ class BaseSQLDBExecutor(ABC):
                 row = [str(i)[:100] for i in row]
                 stmt = insert(table).values(dict(zip(table.columns.keys(), row)))
                 compiled = stmt.compile(
-                    dialect=conn.bind.dialect, compile_kwargs={"literal_binds": True}
+                    dialect=conn.dialect, compile_kwargs={"literal_binds": True}
                 )
                 inserts.append(str(compiled))
 
