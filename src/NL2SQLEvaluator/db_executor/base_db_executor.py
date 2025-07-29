@@ -1,7 +1,6 @@
 import logging
 import re
 from abc import ABC, abstractmethod
-from sqlite3 import ProgrammingError
 from typing import Optional, Literal
 
 from langgraph.func import task
@@ -158,7 +157,7 @@ class BaseSQLDBExecutor(ABC):
         meta_tables = [
             tbl
             for tbl in self.metadata.sorted_tables
-            if tbl.name in table_names_lower
+            if tbl.name.lower() in table_names_lower
                and not (self.dialect == "sqlite" and tbl.name.startswith("sqlite_"))
         ]
 
@@ -174,10 +173,10 @@ class BaseSQLDBExecutor(ABC):
 
                 if add_sample_rows_strategy and add_sample_rows_strategy == "inline":
                     table_info = self._add_inline_example_rows(
-                        table_info, table, num_rows=5
+                        table_info, table, num_rows=1
                     )
                 elif add_sample_rows_strategy and add_sample_rows_strategy == "append":
-                    insert_into = self._return_insert_rows_dump(table, num_rows=5)
+                    insert_into = self._return_insert_rows_dump(table, num_rows=1)
                     table_info = f"{table_info}\n{insert_into}"
 
                 tables.append(table_info)
@@ -186,20 +185,19 @@ class BaseSQLDBExecutor(ABC):
         final_str = "\n\n".join(tables)
         return final_str
 
-    def _return_select_rows(self, table: Table, num_rows: int = 5):
+    def _return_select_rows(self, table: Table, num_rows: int = 1):
         """Return select rows using thread-safe session."""
-        command = select(table).limit(num_rows)
         sample_rows_result = []
         try:
             sample_rows_result = self.execute_query(
-                query=command, mysql_cache=None
+                query=f"SELECT * FROM `{table.name}` LIMIT {num_rows}",
             )
-        except ProgrammingError as e:
+        except Exception as e:
             self.logger.error(f"Error executing select query on table {table.name}: {e}. Skipping sample rows.")
 
         return sample_rows_result
 
-    def _add_inline_example_rows(self, table_info, table, num_rows=5):
+    def _add_inline_example_rows(self, table_info, table, num_rows=1):
         sample_rows = list(self._return_select_rows(table, num_rows))
         col_examples = {}
         if sample_rows:
