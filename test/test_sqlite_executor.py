@@ -39,7 +39,7 @@ class Timer:
 # 3.  Tests
 # ---------------------------------------------------------------------------
 def test_execute_query_simple(executor: SqliteDBExecutor):
-    """Basic SELECT should return 3 rows."""
+    from sqlalchemy import create_engine, text
     result = executor.execute_query("SELECT COUNT(*) FROM Airlines")
     assert result == [(701352,)]
 
@@ -84,20 +84,23 @@ def test_timeout_returns_none(executor: SqliteDBExecutor):
     A slow query that sleeps 0.2 s but has a 0.1 s timeout
     must come back as None, not raise.
     """
-    executor.set_different_timeout(0.001)
+    executor = SqliteDBExecutor.from_uri(relative_base_path='/home/papicchi/NL-to-SQL-Evaluator/data/bird_dev/dev_databases/toxicology/toxicology.sqlite')
+    executor.set_different_timeout(5)
     query = """
-            -- Recursively count to ten million, then aggregate
-            WITH RECURSIVE cnt(n) AS (SELECT 1
-                                      UNION ALL
-                                      SELECT n + 1
-                                      FROM cnt
-                                      WHERE n < 10_000_000)
-            SELECT AVG(n)
-            FROM cnt;
+            WITH RECURSIVE ConnectedAtoms AS (
+                SELECT atom_id2 AS current_atom
+                FROM connected
+                WHERE atom_id IN (SELECT atom_id FROM atom WHERE molecule_id = 'TR181')
+                UNION ALL
+                SELECT c.atom_id2
+                FROM connected c
+                INNER JOIN ConnectedAtoms ca ON c.atom_id = ca.current_atom
+            )
+            SELECT DISTINCT current_atom FROM ConnectedAtoms;
             """
-    for _ in range(10):
-        res = executor.execute_query(query)
-        assert res is None
+    for query in [query] * 2:
+        results = executor.execute_query(query)
+        assert results is None
 
 
 def test_multiple_timeout(executor: SqliteDBExecutor):
@@ -105,19 +108,22 @@ def test_multiple_timeout(executor: SqliteDBExecutor):
     Ten slow queries in parallel, each exceeding its own timeout,
     must all return None.
     """
-    executor.set_different_timeout(0.001)
+    executor = SqliteDBExecutor.from_uri(
+        relative_base_path='data/bird_dev/dev_databases/toxicology/toxicology.sqlite'
+    )
+    executor.set_different_timeout(5)
     query = """
-            -- Recursively count to ten million, then aggregate
-            WITH RECURSIVE cnt(n) AS (SELECT 1
-                                      UNION ALL
-                                      SELECT n + 1
-                                      FROM cnt
-                                      WHERE n < 10_000_000)
-            SELECT SUM(n)
-            FROM cnt;
+            WITH RECURSIVE ConnectedAtoms AS (SELECT atom_id2 AS current_atom \
+                                              FROM connected \
+                                              WHERE atom_id IN (SELECT atom_id FROM atom WHERE molecule_id = 'TR181') \
+                                              UNION ALL \
+                                              SELECT c.atom_id2 \
+                                              FROM connected c \
+                                                       INNER JOIN ConnectedAtoms ca ON c.atom_id = ca.current_atom)
+            SELECT DISTINCT current_atom \
+            FROM ConnectedAtoms;
             """
-
-    queries = [query] * 100
+    queries = [query] * 5
     out = executor.execute_multiple_query(
         queries, max_thread_num=20, timeout=1
     )

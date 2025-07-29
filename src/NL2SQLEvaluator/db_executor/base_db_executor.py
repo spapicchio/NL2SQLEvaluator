@@ -44,6 +44,7 @@ class BaseSQLDBExecutor(ABC):
                  cache_db: Optional[MySQLCache] = None,
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
+                 save_in_cache=False,
                  *args,
                  **kwargs):
         self.timeout = timeout
@@ -55,6 +56,7 @@ class BaseSQLDBExecutor(ABC):
         self.engine_url = str(engine.url)
         if not self.table_names:
             self.logger.error(f"No tables found in database at {self.engine_url}.")
+        self.save_in_cache = save_in_cache
 
     @property
     def dialect(self) -> str:
@@ -96,7 +98,7 @@ class BaseSQLDBExecutor(ABC):
 
         self.logger.debug("Query not found in cache, executing query.")
         result = self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
-        if result is not None:
+        if self.save_in_cache:
             self.cache_db.insert_in_cache(self.db_id, str(query), result)
             self.logger.debug("Query cached in cache database.")
         return result

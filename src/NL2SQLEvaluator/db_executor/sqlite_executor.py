@@ -1,9 +1,11 @@
 import concurrent
+import contextlib
 import os
 import sqlite3
 import time
 from typing import Optional
 
+from func_timeout import func_set_timeout, FunctionTimedOut
 from sqlalchemy import create_engine, text, sql, event, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -15,13 +17,15 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._install_pragmas_listener()
-        self._install_timeout_listener(max_ms=self.timeout * 1000, vm_steps=1000)
 
     def set_different_timeout(self, timeout: int | float) -> None:
         """Set a different timeout for the current instance."""
         self.timeout = timeout
-        self._install_timeout_listener(max_ms=timeout * 1000, vm_steps=1000)
-        self.logger.info(f"Timeout set to {self.timeout} seconds.")
+
+    @contextlib.contextmanager
+    def connection(self):
+        with self.engine.connect() as con:
+            yield con
 
     @classmethod
     def from_uri(cls, *args, **kwargs) -> "SqliteDBExecutor":
@@ -66,47 +70,32 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
             finally:
                 cursor.close()
 
-    def _install_timeout_listener(self, max_ms=1_000, vm_steps=1_000):
-        """Abort any statement that runs longer than max_ms (wall‑clock)."""
-        self.logger.warning(
-            f'Set execution timeout to {max_ms / 1000} seconds. If you want to change it, call `set_different_timeout()` or initialize class with different timeout.')
-
-        @event.listens_for(self.engine, "before_cursor_execute")
-        def _before(conn, cursor, statement, params, context, executemany):
-            start = time.perf_counter()
-
-            def _progress():
-                if (time.perf_counter() - start) * 1000 > max_ms:
-                    return 1  # non‑zero → SQLITE_INTERRUPT
-                return 0
-
-            conn.connection.set_progress_handler(_progress, vm_steps)
-
-        @event.listens_for(self.engine, "after_cursor_execute")
-        def _after(conn, *_):
-            # remove handler so the next statement starts with a clean slate
-            conn.connection.set_progress_handler(None, 0)
-
     def execute_query(self,
                       query: str | sql.Executable,
                       params: Optional[dict] = None,
                       throw_if_error: bool = False,
                       *args, **kwargs) -> Optional[list[tuple]]:
-        query = text(query) if isinstance(query, str) else query
-        try:
-            with self.engine.connect() as conn:
-                cursor = conn.execute(query, params)
-                rows = cursor.fetchall()
-                result = [row._tuple() for row in rows]
-        except SQLAlchemyError as e:
-            if 'interrupted' in str(e):
-                self.logger.warning(f"SQL Timeout after {self.timeout}: error: {e}")
-            else:
+
+        @func_set_timeout(self.timeout)
+        def _execute_with_timeout(query, params):
+            query = text(query) if isinstance(query, str) else query
+            try:
+                with self.connection() as conn:
+                    cursor = conn.execute(query, params)
+                    rows = cursor.fetchall()
+                    result = [row._tuple() for row in rows]
+            except SQLAlchemyError as e:
                 self.logger.warning(e)
-            if throw_if_error:
-                raise e
-            result = None
-        return result
+                if throw_if_error:
+                    raise e
+                result = None
+            return result
+
+        try:
+            return _execute_with_timeout(query, params)
+        except FunctionTimedOut as e:
+            self.logger.warning(f"execute_query timed out after {self.timeout}. Returning None.")
+            return None
 
     def execute_multiple_query(self,
                                queries: list[str | sql.Executable],

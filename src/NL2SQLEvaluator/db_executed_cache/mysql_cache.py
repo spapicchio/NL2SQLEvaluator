@@ -100,6 +100,10 @@ class MySQLCache:
                         "autocommit": True,
                     },
                     echo=is_echo,
+                    pool_size=20, max_overflow=40,
+                    pool_timeout=60,
+                    pool_pre_ping=True,
+                    pool_recycle=1800
                 ),
                 logger=logger,
             )
