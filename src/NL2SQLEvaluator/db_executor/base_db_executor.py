@@ -28,7 +28,6 @@ from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
 from sqlalchemy.sql.sqltypes import NullType
 
-from NL2SQLEvaluator.db_executed_cache import MySQLCache
 from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.task_definition import SingleTask, SQLTask
@@ -98,7 +97,7 @@ class BaseSQLDBExecutor(ABC):
 
     def __init__(self,
                  engine: Engine,
-                 cache_db: Optional[MySQLCache] = None,
+                 cache_db: Optional["BaseSQLDBExecutor"] = None,
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
                  save_in_cache=False,
@@ -108,11 +107,11 @@ class BaseSQLDBExecutor(ABC):
         self.cache_db = cache_db
         self.logger = logger or get_logger(name=__name__, level="INFO")
         self.timeout = timeout
-        self._reflect()
         self.metadata = MetaData()
+        self._reflect()
         self.engine_url = str(engine.url)
         if not self.table_names:
-            self.logger.error(f"No tables found in database at {self.engine_url}.")
+            self.logger.warning(f"No tables found in database at {self.engine_url}.")
         self.save_in_cache = save_in_cache
 
     # -----------------
@@ -255,7 +254,7 @@ class BaseSQLDBExecutor(ABC):
             return self.execute_query(query, params, throw_if_error=throw_if_error, *args, **kwargs)
 
         # Check if the query result is already cached
-        cached_result = self.cache_db.get_from_cache(self.db_id, str(query))
+        cached_result = self.cache_db.fetch_from_cache(self.db_id, str(query))
         if cached_result is not None:
             return cached_result
 
@@ -277,7 +276,7 @@ class BaseSQLDBExecutor(ABC):
     # -----------------
     # Table Info Helpers
     # -----------------
-    def get_table_info(
+    def get_ddl_database(
             self,
             table_names: Optional[list[str]] = None,
             add_sample_rows_strategy: Optional[Literal["append", "inline"]] = None,
@@ -338,3 +337,22 @@ class BaseSQLDBExecutor(ABC):
         tables.sort()
         final_str = "\n\n".join(tables)
         return final_str
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.dispose()
+
+    def dispose(self):
+        """Dispose of the engine and clean up connections."""
+        if hasattr(self, 'engine') and self.engine:
+            self.engine.dispose()
+            self.logger.debug("Engine disposed")
+
+    def __del__(self):
+        """Cleanup when object is garbage collected."""
+        try:
+            self.dispose()
+        except Exception:
+            pass  # Ignore errors during cleanup
