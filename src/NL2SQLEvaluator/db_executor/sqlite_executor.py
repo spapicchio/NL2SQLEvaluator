@@ -1,13 +1,18 @@
 import concurrent
 import contextlib
+import hashlib
 import os
+import pickle
 import sqlite3
 import time
 from typing import Optional
 
+import sqlglot
 from func_timeout import func_set_timeout, FunctionTimedOut
 from sqlalchemy import create_engine, text, sql, event, Engine
 from sqlalchemy.exc import SQLAlchemyError
+from tqdm import tqdm
+from typing_extensions import override
 
 from NL2SQLEvaluator.db_executor.base_db_executor import BaseSQLDBExecutor
 from NL2SQLEvaluator.logger import get_logger
@@ -29,7 +34,6 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
 
     @classmethod
     def from_uri(cls, *args, **kwargs) -> "SqliteDBExecutor":
-        # TODO update cache DB
         logger = get_logger(name=__name__, level="INFO")
         db_path = kwargs.get("relative_base_path")
         if not os.path.exists(db_path):
@@ -79,11 +83,19 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
         @func_set_timeout(self.timeout)
         def _execute_with_timeout(query, params):
             query = text(query) if isinstance(query, str) else query
+            is_write = False
+            if 'INSERT' in str(query).upper() or 'UPDATE' in str(query).upper() or 'DELETE' in str(query).upper() or 'CREATE' in str(query).upper() or 'DROP' in str(query).upper() or 'ALTER' in str(query).upper():
+                is_write = True
             try:
                 with self.connection() as conn:
                     cursor = conn.execute(query, params)
-                    rows = cursor.fetchall()
-                    result = [row._tuple() for row in rows]
+                    if is_write:
+                        result = []
+                        conn.commit()
+                    else:
+                        rows = cursor.fetchall()
+                        result = [row._tuple() for row in rows]
+
             except SQLAlchemyError as e:
                 self.logger.warning(e)
                 if throw_if_error:
@@ -121,7 +133,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
                 executor.submit(self.execute_query_and_cache, q, p, throw_if_error=throw_if_error): i
                 for i, (q, p) in enumerate(zip(queries, params))
             }
-            for future in concurrent.futures.as_completed(futures):
+            for future in tqdm(concurrent.futures.as_completed(futures), desc="Executing query"):
                 idx = futures[future]
                 try:
                     results[idx] = future.result()
@@ -132,3 +144,86 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
             f"Executed multiple queries in {time.time() - start:.2f} seconds",
         )
         return results
+
+
+def hash_db_id_sql(db_id, query) -> str:
+    value = f"{db_id}|{query}"
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+class SqliteCacheDB(SqliteDBExecutor):
+    @classmethod
+    @override
+    def from_uri(cls, *args, **kwargs) -> "SqliteDBExecutor":
+        logger = get_logger(name=__name__, level="INFO")
+        db_path = kwargs.get("relative_base_path")
+        if not os.path.exists(db_path):
+            raise FileNotFoundError(f"SQLite database file not found at {db_path}")
+        uri = f"sqlite:///{db_path}?mode=rw&check_same_thread=false"
+        logger.info(f"Connecting to SQLite database with URI {uri}")
+        engine = create_engine(uri,
+                               # echo=True, echo_pool=True,
+                               pool_size=20, max_overflow=40,
+                               pool_timeout=60,
+                               connect_args={
+                                   "timeout": 60
+                               },
+                               pool_pre_ping=True,
+                               pool_recycle=1800)
+        initiated_object = cls(engine=engine, cache_db=None)
+        initiated_object.create_cache_table()
+        return initiated_object
+
+    def create_cache_table(self) -> None:
+        """Create the cache table if it does not exist."""
+        create_table_sql = """
+                           CREATE TABLE IF NOT EXISTS `cache_data`
+                           (
+                               `hash_key` TEXT PRIMARY KEY,
+                               `db_id`    TEXT NOT NULL,
+                               `query`    TEXT NOT NULL,
+                               `result`   BLOB NOT NULL
+                           );
+                           """.strip()
+        self.execute_query(create_table_sql)
+
+    def insert_in_cache(self, db_id: str, query: str, result: list[tuple]) -> None:
+        query = self.parse_sql_query(query)
+        hash_id = hash_db_id_sql(db_id, query)
+        self.logger.debug(
+            f"Inserting (or Ignore if duplicate) in cache with hash_id: {hash_id}"
+        )
+        pickled_result = pickle.dumps(result)
+        hash_id = hash_db_id_sql(db_id, query)
+        stmt = "INSERT OR IGNORE INTO `cache_data` (hash_key, db_id, query, result) VALUES (:hash_id, :db_id, :query, :result)"
+        try:
+            self.execute_query(stmt, {"hash_id": hash_id, "db_id": db_id, "query": query, "result": pickled_result})
+        except Exception as e:
+            self.logger.error(
+                f"Failed to insert into cache for `{db_id}`, `{query}`, error: {e}"
+            )
+        return None
+
+    def fetch_from_cache(self, db_id: str, query: str) -> Optional[list[tuple]]:
+        """Fetch the result of a query from the cache."""
+        query = self.parse_sql_query(query)
+        hash_id = hash_db_id_sql(db_id, query)
+        self.logger.debug(f"Fetching from cache with hash_id: {hash_id}")
+
+        try:
+            stmt = "SELECT `result` FROM `cache_data` WHERE hash_key = :hash_id"
+            result_row = self.execute_query(query=stmt, params={"hash_id": hash_id})
+            return pickle.loads(result_row[0][0]) if result_row else None
+        except Exception as e:
+            self.logger.error(
+                f"Failed to retrieve from cache for `{db_id}`, `{query}`, error: {e}"
+            )
+        return None
+
+    def parse_sql_query(self, query: str, dialect: str = "sqlite") -> str:
+        try:
+            parsed_query = sqlglot.transpile(query, dialect, identity=True)
+            return parsed_query[0]
+        except Exception as e:
+            self.logger.error(f"Failed to parse SQL query: {query}, error: {e}")
+            return query

@@ -62,11 +62,12 @@ def _utils_select_rows_from(table: Table, execute_fn: Callable, num_rows: int = 
             It should accept keyword argument `query` with a SQL string.
         num_rows (int): Number of rows to retrieve.
 
+    Notes:
+        If `execute_fn` raises an exception, this function will catch it and return an empty list.
+        This allows callers to handle sampling failures gracefully.
+
     Returns:
         Any: Result of `execute_fn`, expected to be an iterable of rows.
-
-    Raises:
-        Exception: Propagates any exception raised by `execute_fn`.
     """
     try:
         sample_rows_result = execute_fn(
@@ -74,7 +75,7 @@ def _utils_select_rows_from(table: Table, execute_fn: Callable, num_rows: int = 
         )
     except Exception as e:
         # Re-raise to let callers decide how to handle failures during sampling.
-        raise
+        return []
     return sample_rows_result
 
 
@@ -98,7 +99,8 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
 
     col_examples = {}
     for idx, col in enumerate(table.columns):
-        examples = {row[idx] for row in sample_rows if row[idx] is not None}
+        # truncate long values for readability in comments
+        examples = {str(row[idx])[:100] for row in sample_rows if row[idx] is not None}
         if examples:
             col_examples[col.name] = f"Example Values: {tuple(examples)}"
 
@@ -152,4 +154,4 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
         inserts.append(str(compiled))
 
     inserts = "\n".join(inserts)
-    return f"{ddl}\n{inserts}"
+    return f"{ddl}\n{inserts}" if inserts else ddl
