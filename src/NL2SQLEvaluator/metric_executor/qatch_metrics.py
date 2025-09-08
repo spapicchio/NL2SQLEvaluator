@@ -19,7 +19,7 @@ def _base_for_precision_and_recall(executed_target: list[tuple[Value, ...]],
     return sum_cell_match, len(target), len(prediction)
 
 
-@task
+@task()
 def worker_cell_precision(executed_target: list[tuple[Value, ...]],
                           executed_predicted: list[tuple[Value, ...]]) -> float:
     target_len = len(executed_target)
@@ -37,7 +37,7 @@ def worker_cell_precision(executed_target: list[tuple[Value, ...]],
     return round(sum_cell_match / len_prediction, 3)
 
 
-@task
+@task()
 def worker_cell_recall(executed_target: list[tuple[Value, ...]], executed_predicted: list[tuple[Value, ...]]) -> float:
     target_len = len(executed_target)
     prediction_len = len(executed_predicted)
@@ -55,7 +55,7 @@ def worker_cell_recall(executed_target: list[tuple[Value, ...]], executed_predic
     return round(sum_cell_match / len_target, 3)
 
 
-@task
+@task()
 def worker_tuple_cardinality(executed_target: list[tuple[Value, ...]],
                              executed_predicted: list[tuple[Value, ...]]) -> float:
     if len(executed_target) == len(executed_predicted) == 0:
@@ -69,7 +69,7 @@ def worker_tuple_cardinality(executed_target: list[tuple[Value, ...]],
     return round(len(executed_predicted) / len(executed_target), 3)
 
 
-@task
+@task()
 def worker_tuple_constraint(executed_target: list[tuple[Value, ...]],
                             executed_predicted: list[tuple[Value, ...]]) -> float:
     target_len = len(executed_target)
@@ -91,7 +91,7 @@ def worker_tuple_constraint(executed_target: list[tuple[Value, ...]],
     return round(sum(cardinality) / len(cardinality), 3)
 
 
-@task
+@task()
 def worker_tuple_order(executed_target: list[tuple[Value, ...]], executed_predicted: list[tuple[Value, ...]]) -> float:
     def normalize(data: float):
         data = [-1, data, 1]
@@ -137,7 +137,7 @@ def worker_tuple_order(executed_target: list[tuple[Value, ...]], executed_predic
     return float(normalize(round(rho, 3)))
 
 
-@task
+@task()
 def worker_f1_score(executed_target: list[tuple[Value, ...]], executed_predicted: list[tuple[Value, ...]]) -> float:
     cell_precision = worker_cell_precision(executed_target, executed_predicted)
     cell_recall = worker_cell_recall(executed_target, executed_predicted)

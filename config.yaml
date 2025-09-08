@@ -1,0 +1,26 @@
+output_dir: './outputs'
+seed: 42
+
+# Dataset Configuration
+relative_db_base_path: data/bird_dev/dev_databases
+dataset_path: simone-papicchio/bird
+dataset_name: bird-dev
+split: dev
+
+# Model Configuration
+model_name: 'Qwen3-Coder-30B'
+model: 'Qwen/Qwen3-Coder-30B-A3B-Instruct'
+temperature: 0.7
+top_p: 0.8
+top_k: 20
+repetition_penalty: 1.05
+max_tokens: 32000
+
+# Wandb Configuration
+project: text2sql-eval
+entity: spapicchio-politecnico-di-torino          # or your team
+group: evals
+mode: online           # or 'offline' on clusters without net
+tags: [eval, seg]
+notes: ""
+job_type: eval

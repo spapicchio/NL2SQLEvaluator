@@ -5,13 +5,20 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "fastparquet>=2024.11.0",
     "func-timeout>=4.3.5",
     "langgraph>=0.4.0",
     "loguru>=0.7.3",
     "numpy>=1.9.0",
+    "pandas>=2.3.2",
+    "pyarrow>=21.0.0",
     "pydantic>=2.11.7",
     "pymysql>=1.1.1",
+    "python-dotenv>=1.1.1",
     "sqlalchemy>=2.0.41",
+    "sqlglot>=27.11.0",
+    "tqdm>=4.67.1",
+    "wandb>=0.21.3",
 ]
 
 [dependency-groups]
@@ -20,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-NL2SQLEvaluator = "NL2SQLEvaluator:main"
+nl2sql_eval = "NL2SQLEvaluator.cli:cli"
 
 [build-system]
 requires = ["hatchling"]

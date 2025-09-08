@@ -3,7 +3,7 @@ from langgraph.func import task
 from NL2SQLEvaluator.metric_executor.utils_value import Value, sort_with_different_types
 
 
-@task
+@task()
 def worker_execution_accuracy(
         executed_target: list[tuple[Value, ...]], executed_predicted: list[tuple[Value, ...]]
 ) -> float:
