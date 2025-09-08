@@ -30,7 +30,7 @@ from sqlalchemy.sql.sqltypes import NullType
 
 from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
 from NL2SQLEvaluator.logger import get_logger
-from NL2SQLEvaluator.task_definition import SingleTask, SQLTask
+from NL2SQLEvaluator.task_state import SQLInstance, SingleTask
 
 
 @task()
@@ -54,8 +54,8 @@ def db_executor_worker(single_task: SingleTask) -> SingleTask:
     executed_predicted = engine.execute_query_and_cache(single_task.predicted_sql.query) \
         if single_task.predicted_sql.executed is None else single_task.predicted_sql.executed
 
-    target = SQLTask(query=single_task.target_sql.query, executed=executed_target)
-    predicted = SQLTask(query=single_task.predicted_sql.query, executed=executed_predicted)
+    target = SQLInstance(query=single_task.target_sql.query, executed=executed_target)
+    predicted = SQLInstance(query=single_task.predicted_sql.query, executed=executed_predicted)
 
     return SingleTask(
         target_sql=target,
