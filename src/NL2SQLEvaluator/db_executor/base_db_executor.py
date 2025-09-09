@@ -226,11 +226,11 @@ class BaseSQLDBExecutor(ABC):
     # -----------------
     # Execute query and cache
     # -----------------
-    def execute_query_and_cache(self,
-                                query: str | sql.Executable,
-                                params: Optional[list[tuple]] = None,
-                                throw_if_error: bool = False,
-                                *args, **kwargs) -> list[tuple]:
+    def execute_query_with_cache(self,
+                                 query: str | sql.Executable,
+                                 params: Optional[list[tuple]] = None,
+                                 throw_if_error: bool = False,
+                                 *args, **kwargs) -> list[tuple]:
         """
         Execute a query with optional read-through cache.
 

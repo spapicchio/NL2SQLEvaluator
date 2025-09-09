@@ -62,14 +62,7 @@ def execute_multiple_queries(queries: list[str | list],
     if isinstance(queries[0], str):
         # Assume queries is already executed
         queries = executor.execute_multiple_query(queries)
-    formatted_queries = [
-        [
-            tuple(Value(raw=v, epsilon=epsilon) for v in row)  # update all the values
-            for row in query  # for each row in the query
-        ]
-        for query in queries  # for each query
-    ]
-    return formatted_queries
+    return queries
 
 
 @task()

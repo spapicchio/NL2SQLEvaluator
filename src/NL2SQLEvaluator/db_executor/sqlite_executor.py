@@ -117,7 +117,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
                                *args,
                                **kwargs) -> list[list[tuple] | None]:
         if len(queries) == 1:
-            return [self.execute_query_and_cache(queries[0], params[0] if params else None)]
+            return [self.execute_query_with_cache(queries[0], params[0] if params else None)]
         self.logger.debug(
             f"Executing multiple {len(queries)} queries concurrently with max_thread_num={max_thread_num} and timeout={self.timeout}"
         )
@@ -130,7 +130,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
         num_thread = min(len(queries), max_thread_num)
         with concurrent.futures.ThreadPoolExecutor(max_workers=num_thread) as executor:
             futures = {
-                executor.submit(self.execute_query_and_cache, q, p, throw_if_error=throw_if_error): i
+                executor.submit(self.execute_query_with_cache, q, p, throw_if_error=throw_if_error): i
                 for i, (q, p) in enumerate(zip(queries, params))
             }
             for future in tqdm(concurrent.futures.as_completed(futures), desc="Executing query"):
