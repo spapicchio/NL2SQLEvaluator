@@ -1,54 +1,44 @@
-from dataclasses import field, dataclass
-from typing import Literal, List
+import os
+from functools import lru_cache
 
-import wandb
+import pandas as pd
+from datasets import load_dataset
 
-
-@dataclass
-class WandbArgs:
-    project: str = field(
-        default="text2sql-eval",
-        metadata={"help": "Weights & Biases project name for logging"}
-    )
-    entity: str = field(
-        default="spapicchio-politecnico-di-torino",
-        metadata={"help": "Weights & Biases entity/username"}
-    )
-    group: str = field(
-        default="evals",
-        metadata={"help": "Experiment group name for organizing runs"}
-    )
-    mode: Literal["online", "offline"] = field(
-        default="online",
-        metadata={"help": "Logging mode: online (sync to cloud) or offline (local only)"}
-    )
-    tags: List[str] = field(
-        default_factory=lambda: ["eval", "seg"],
-        metadata={"help": "List of tags to categorize the experiment run"}
-    )
-    notes: str = field(
-        default="",
-        metadata={"help": "Additional notes or description for the experiment"}
-    )
-    job_type: str = field(
-        default="eval",
-        metadata={"help": "Type of job being run (e.g., eval, train, test)"}
-    )
+from NL2SQLEvaluator.db_executor import BaseSQLDBExecutor
+from NL2SQLEvaluator.orchestrator_state import AvailableDialect
 
 
-def utils_init_wandb(wandb_args: WandbArgs, run_name: str) -> wandb.sdk.wandb_run.Run | None:
-    """Initialize W&B if enabled; return the run or None."""
-    mode = wandb_args.mode
-    if mode == "disabled":
-        return None
-    run = wandb.init(
-        project=wandb_args.project,
-        entity=wandb_args.entity,
-        mode=mode,  # "online" | "offline"
-        group=wandb_args.group,  # group runs in W&B
-        job_type=wandb_args.job_type,
-        name=run_name,
-        tags=wandb_args.tags,
-        notes=wandb_args.notes,
-    )
-    return run
+@lru_cache(maxsize=100)
+def utils_get_engine(relative_base_path, db_executor: AvailableDialect, db_id: str, *args, **kwargs) -> BaseSQLDBExecutor:
+    try:
+        if db_executor == AvailableDialect.sqlite:
+            from NL2SQLEvaluator.db_executor.sqlite_executor import SqliteDBExecutor
+            return SqliteDBExecutor.from_uri(
+                relative_base_path=os.path.join(relative_base_path, db_id, f"{db_id}.sqlite"), *args, **kwargs)
+    except Exception as e:
+        raise ValueError(f"Error initializing database executor for {relative_base_path}: {e}")
+    raise ValueError(f"Database executor not supported: {db_executor}. Supported: {list(AvailableDialect)}")
+
+
+def utils_read_dataset(file_name) -> list[dict]:
+    if file_name.endswith('.csv'):
+        df = pd.read_csv(file_name).to_list()
+
+    elif file_name.endswith('.json'):
+        df = pd.read_json(file_name)
+
+    elif file_name.endswith('.parquet'):
+        df = pd.read_parquet(file_name)
+
+    else:
+        # assume reading with Hugging Face datasets library
+        dataset = load_dataset(file_name)
+        dataset = dataset['dev'] if 'dev' in dataset else dataset[list(dataset.keys())[0]]
+        df = dataset.to_pandas()
+
+    # # TODO remove only used for debugging
+    # df['predicted_sql'] = df['SQL']
+    # df = df[:100]
+    # # TODO ---------------------------
+
+    return df.to_dict(orient='records')

@@ -15,7 +15,7 @@ from NL2SQLEvaluator.metric_executor.qatch_metrics import (
     worker_f1_score
 )
 from NL2SQLEvaluator.metric_executor.utils_value import Value
-from NL2SQLEvaluator.task_state import SingleTask, AvailableMetrics
+from NL2SQLEvaluator.orchestrator_state import SingleTask, AvailableMetrics
 
 metric_functions = {
     AvailableMetrics.EXECUTION_ACCURACY: worker_execution_accuracy,
@@ -73,10 +73,15 @@ def execute_multiple_queries(queries: list[str | list],
 
 
 @task()
-def execute_metrics(executed_target: list, executed_predicted: list, metrics: list[AvailableMetrics]) -> dict[str, float]:
+def execute_metrics(executed_target: list, executed_predicted: list, metrics: list[AvailableMetrics], epsilon=1e-6) -> \
+        dict[
+            str, float]:
     results = {}
     for metric in metrics:
-        results[metric.name.lower()] = metric_functions[metric](executed_target, executed_predicted)
+        results[metric.name.lower()] = metric_functions[metric](
+            [tuple(Value(raw=v, epsilon=epsilon) for v in row) for row in executed_target],
+            [tuple(Value(raw=v, epsilon=epsilon) for v in row) for row in executed_predicted],
+        )
     return {name: result.result() for name, result in results.items()}
 
 
@@ -85,17 +90,17 @@ def evaluator_worker(
         single_task: SingleTask
 ) -> SingleTask:
     logger = get_logger(__name__, level="INFO")
-    logger.info(
-        f"Starting evaluation for {single_task.metrics_to_calculate}"
+    logger.debug(
+        f"Starting evaluation for {single_task.eval_parameters.metrics}"
     )
-    logger.warning(
+    logger.debug(
         f"Initializing class with epsilon 10e-6, float/int number will be considered equal if they differ less than epsilon."
     )
     executed_metrics = execute_metrics(
         single_task.target_sql.executed,
         single_task.predicted_sql.executed,
-        single_task.metrics_to_calculate).result()
-    return SingleTask(executed_metrics=executed_metrics, **single_task.model_dump(exclude={"executed_metrics"}))
+        single_task.eval_parameters.metrics).result()
+    return SingleTask(results=executed_metrics, **single_task.model_dump(exclude={"results"}))
 
     # TODO: Check different data types coming from different database! Probably best option is to pass everything as str
     # CHeck if when executing obtaining different types of data str instead to float

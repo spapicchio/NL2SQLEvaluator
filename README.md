@@ -23,7 +23,6 @@ seed: 42
 relative_db_base_path: data/bird_dev/dev_databases
 dataset_path: simone-papicchio/bird
 dataset_name: bird-dev
-split: dev   # one of: train | dev | test
 
 # Model
 model_name: Qwen3-Coder-30B

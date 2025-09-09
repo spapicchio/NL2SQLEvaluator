@@ -1,11 +1,14 @@
 output_dir: './outputs'
 seed: 42
+batch_size: 50
 
 # Dataset Configuration
 relative_db_base_path: data/bird_dev/dev_databases
 dataset_path: simone-papicchio/bird
 dataset_name: bird-dev
-split: dev
+column_name_target: 'SQL'
+column_name_predicted: 'predicted_sql'
+column_name_db_id: 'db_id'
 
 # Model Configuration
 model_name: 'Qwen3-Coder-30B'
