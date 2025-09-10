@@ -10,7 +10,7 @@ External API:
   - BaseSQLDBExecutor.from_uri
   - BaseSQLDBExecutor.execute_query
   - BaseSQLDBExecutor.execute_multiple_query
-  - BaseSQLDBExecutor.execute_query_and_cache
+  - BaseSQLDBExecutor.execute_query_with_cache
   - BaseSQLDBExecutor.get_table_info
   - BaseSQLDBExecutor.table_names
   - BaseSQLDBExecutor.dialect
@@ -46,12 +46,12 @@ def db_executor_worker(single_task: SingleTask) -> SingleTask:
     Returns:
         SingleTask: A copy of the task with `target_sql.executed` and `predicted_sql.executed` populated.
     """
-    engine = single_task.dataset_parameters.engine
+    engine = single_task.engine
 
-    executed_target = engine.execute_query_and_cache(single_task.target_sql.query) \
+    executed_target = engine.execute_query_with_cache(single_task.target_sql.query) \
         if single_task.target_sql.executed is None else single_task.target_sql.executed
 
-    executed_predicted = engine.execute_query_and_cache(single_task.predicted_sql.query) \
+    executed_predicted = engine.execute_query_with_cache(single_task.predicted_sql.query) \
         if single_task.predicted_sql.executed is None else single_task.predicted_sql.executed
 
     target = SQLInstance(query=single_task.target_sql.query, executed=executed_target)
