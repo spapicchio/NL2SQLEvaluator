@@ -84,7 +84,7 @@ def evaluator_worker(
 ) -> SingleTask:
     logger = get_logger(__name__, level="INFO")
     logger.debug(
-        f"Starting evaluation for {single_task.eval_parameters.metrics}"
+        f"Starting evaluation for {single_task.metrics}"
     )
     logger.debug(
         f"Initializing class with epsilon 10e-6, float/int number will be considered equal if they differ less than epsilon."
@@ -92,7 +92,7 @@ def evaluator_worker(
     executed_metrics = execute_metrics(
         single_task.target_sql.executed,
         single_task.predicted_sql.executed,
-        single_task.eval_parameters.metrics).result()
+        single_task.metrics).result()
     return SingleTask(results=executed_metrics, **single_task.model_dump(exclude={"results"}))
 
     # TODO: Check different data types coming from different database! Probably best option is to pass everything as str

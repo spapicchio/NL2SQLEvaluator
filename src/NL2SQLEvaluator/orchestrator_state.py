@@ -40,31 +40,24 @@ class AvailableMetrics(Enum):
         return None
 
 
-class DataCfg(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    dataset_name: str
-    relative_db_base_path: str
-    dialect: AvailableDialect
-    engine: Any | None = None
-
-
-class EvalCfg(BaseModel):
-    metrics: list[AvailableMetrics] = [AvailableMetrics.EXECUTION_ACCURACY]
-
-
 class SQLInstance(BaseModel):
     query: str | None = None
     executed: list[tuple] | None = None
 
 
 class SingleTask(BaseModel):
-    dataset_parameters: DataCfg
-    eval_parameters: EvalCfg
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    engine: Any | None = None
+
     db_id: str
+    dialect: AvailableDialect
+    relative_db_base_path: str
+    dataset_name: str
+    metrics: list[AvailableMetrics] = [AvailableMetrics.EXECUTION_ACCURACY]
     target_sql: SQLInstance | list[SQLInstance]
     predicted_sql: SQLInstance | list[SQLInstance] | None = None
     results: dict[AvailableMetrics, float] | None = None
+
     external_metadata: dict[str, Any] | None = None
 
 
@@ -78,20 +71,15 @@ def flatten_multiple_tasks(multiple_tasks: MultipleTasks) -> list:
     tasks = multiple_tasks.pop("tasks")
     rows = []
     for task in tasks:
-        task['dataset_parameters']['dialect'] = task['dataset_parameters']['dialect'].value
+        task['dialect'] = task['dialect'].value
         # remove engine
-        task['dataset_parameters'].pop('engine')
-        task.pop('eval_parameters')
-        task['results'] = {result.value: val for result, val in task['results'].items()}
-        rows.append(
-            {
-                "db_id": task["db_id"],
-                "target_sql": task["target_sql"]['query'],
-                "predicted_sql": task["predicted_sql"]['query']
-            } |
-            task['dataset_parameters'] |
-            task['external_metadata'] |
-            task['results']
-        )
+        task.pop('engine')
+        task.pop('metrics')
+        results = {result.value: val for result, val in task.pop('results').items()}
+        task = task | results
+        task['target_sql'] = task["target_sql"]['query']
+        task['predicted_sql'] = task["predicted_sql"]['query']
+        task = task | task.pop('external_metadata')
+        rows.append(task)
 
     return rows

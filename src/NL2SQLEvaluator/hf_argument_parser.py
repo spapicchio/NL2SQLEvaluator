@@ -15,11 +15,8 @@
 # https://github.com/huggingface/transformers/blob/2077f17547f04d41ddbc8c761b7ab3a1f338bc5a/src/transformers/hf_argparser.py#L1
 import argparse
 import dataclasses
-import importlib
-import inspect
 import json
 import os
-import subprocess
 import sys
 import types
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser, ArgumentTypeError
@@ -564,7 +561,7 @@ class TrlParser(HfArgumentParser):
             # Set the defaults from the config values
             config_remaining_strings = self.set_defaults_with_config(**config)
         else:
-            config_remaining_strings = []
+            config_remaining_strings = {}
 
         # Parse the arguments from the command line
         output = self.parse_args_into_dataclasses(args=args, return_remaining_strings=return_remaining_strings)
@@ -579,9 +576,9 @@ class TrlParser(HfArgumentParser):
                 "dataclass, or set `fail_with_unknown_args=False`."
             )
         else:
-            return output
+            return output, config_remaining_strings
 
-    def set_defaults_with_config(self, **kwargs) -> list[str]:
+    def set_defaults_with_config(self, **kwargs) -> dict:
         """
         Overrides the parser's default values with those provided via keyword arguments, including for subparsers.
 
@@ -605,7 +602,8 @@ class TrlParser(HfArgumentParser):
 
         used_keys = apply_defaults(self, kwargs)
         # Remaining args not consumed by the parser
-        remaining = [
-            item for key, value in kwargs.items() if key not in used_keys for item in (f"--{key}", str(value))
-        ]
+        remaining = {
+            key: value
+            for key, value in kwargs.items() if key not in used_keys
+        }
         return remaining
