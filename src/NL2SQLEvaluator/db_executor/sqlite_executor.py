@@ -84,7 +84,9 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
         def _execute_with_timeout(query, params):
             query = text(query) if isinstance(query, str) else query
             is_write = False
-            if 'INSERT' in str(query).upper() or 'UPDATE' in str(query).upper() or 'DELETE' in str(query).upper() or 'CREATE' in str(query).upper() or 'DROP' in str(query).upper() or 'ALTER' in str(query).upper():
+            if 'INSERT' in str(query).upper() or 'UPDATE' in str(query).upper() or 'DELETE' in str(
+                    query).upper() or 'CREATE' in str(query).upper() or 'DROP' in str(query).upper() or 'ALTER' in str(
+                query).upper():
                 is_write = True
             try:
                 with self.connection() as conn:
@@ -152,6 +154,30 @@ def hash_db_id_sql(db_id, query) -> str:
 
 
 class SqliteCacheDB(SqliteDBExecutor):
+    @override
+    def _install_pragmas_listener(self) -> None:
+        """Attach a connect-time callback to *this* engine instance."""
+
+        @event.listens_for(Engine, "connect")
+        def _sqlite_on_connect(dbapi_connection, _):
+            if not isinstance(dbapi_connection, sqlite3.Connection):
+                return  # Ignore non‑SQLite engines
+
+            cursor = dbapi_connection.cursor()
+            try:
+                # PRAGMA journal_mode=WAL;
+                # PRAGMA synchronous=NORMAL;
+                # PRAGMA temp_store=MEMORY;
+                cursor.executescript("""
+                    PRAGMA journal_mode=WAL;
+                    PRAGMA synchronous=NORMAL;
+                    PRAGMA foreign_keys=ON;
+                    PRAGMA mmap_size=30000000000;
+                """)
+                self.logger.debug("Installed SQLite PRAGMAs for high concurrency reads.")
+            finally:
+                cursor.close()
+
     @classmethod
     @override
     def from_uri(cls, *args, **kwargs) -> "SqliteDBExecutor":
@@ -159,7 +185,7 @@ class SqliteCacheDB(SqliteDBExecutor):
         db_path = kwargs.get("relative_base_path")
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"SQLite database file not found at {db_path}")
-        uri = f"sqlite:///{db_path}?mode=rw&check_same_thread=false"
+        uri = f"sqlite:///{db_path}?mode=rwc&cache=shared&check_same_thread=false"
         logger.info(f"Connecting to SQLite database with URI {uri}")
         engine = create_engine(uri,
                                # echo=True, echo_pool=True,
