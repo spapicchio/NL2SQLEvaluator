@@ -37,6 +37,9 @@ class OrchestratorInput(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+logger = get_logger(__name__, level="INFO")
+
+
 @entrypoint()
 def evaluator_orchestrator(
         input: OrchestratorInput
@@ -44,10 +47,12 @@ def evaluator_orchestrator(
     def run_db_id_queries(tar_, pred_, engine):
         executed_targets = execute_multiple_queries(tar_, engine)
         executed_predicteds = execute_multiple_queries(pred_, engine)
+        executed_targets = executed_targets.result()
+        executed_predicteds = executed_predicteds.result()
         results = []
-        for tar, pred in zip(executed_targets.result(), executed_predicteds.result()):
+        for tar, pred in zip(executed_targets, executed_predicteds):
             results.append(execute_metrics(tar, pred, metrics))
-        return [r.result() for r in results]
+        return [r.result() for r in results], executed_targets, executed_predicteds
 
     logger = get_logger(__name__, level="INFO")
     logger.info(
@@ -63,18 +68,35 @@ def evaluator_orchestrator(
             eng2idxs[eng.engine_url].append(i)
             eng_name2engine[eng.engine_url] = eng
 
-        results = [None] * len(input.target_queries)
+        results: list[Optional[dict]] = [None] * len(input.target_queries)
         for eng_name, idxs in eng2idxs.items():
             logger.info(f"Processing {len(idxs)} queries for engine {eng_name}")
             tar_ = [input.target_queries[i] for i in idxs]
             pred_ = [input.predicted_queries[i] for i in idxs]
             eng = eng_name2engine[eng_name]
-            res = run_db_id_queries(tar_, pred_, eng)
+            res, executed_targets, executed_predicteds = run_db_id_queries(tar_, pred_, eng)
             for i, r in zip(idxs, res):
                 results[i] = r
-        return results
     else:
-        return run_db_id_queries(input.target_queries, input.predicted_queries, input.executor)
+        eng = input.executor
+        pred_ = input.predicted_queries
+        tar_ = input.target_queries
+        results, executed_targets, executed_predicteds = run_db_id_queries(tar_, pred_, eng
+                                                                           )
+    if eng.cache_db is not None:
+        # store the predictions in the cache
+        eng.cache_db.insert_bulk_in_cache(
+            db_ids=[eng.db_id] * len(pred_),
+            queries=pred_,
+            results=executed_predicteds
+        )
+        # store the targets in the cache
+        eng.cache_db.insert_bulk_in_cache(
+            db_ids=[eng.db_id] * len(tar_),
+            queries=tar_,
+            results=executed_targets
+        )
+    return results
 
 
 @task()
@@ -95,6 +117,10 @@ def execute_metrics(executed_target: list, executed_predicted: list, metrics: li
 
     if executed_predicted is None:
         # Execution failed, return 0 for all metrics
+        return {name.value: 0.0 for name in metrics}
+
+    if executed_target is None:
+        logger.error('Executed target is None, metrics will be set to zero.')
         return {name.value: 0.0 for name in metrics}
 
     for metric in metrics:
