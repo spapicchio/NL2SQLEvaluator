@@ -27,6 +27,7 @@ def sqlite_cache_executor(tmp_db_file):
     yield executor
     executor.engine.dispose()
 
+
 # ----------------------------
 # Tests SQL normalization
 # ----------------------------
@@ -41,71 +42,81 @@ def test_sql_normalization_remove_spaces(sqlite_cache_executor: SqliteCacheDB):
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == "SELECT * FROM Airlines WHERE TAIL_NUM = 'N956AN'"
 
+
 def test_sql_normalization_no_change(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT COUNT(*) FROM Airlines WHERE TAIL_NUM = 'N956AN'"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == raw_sql
 
+
 def test_sql_normalization_complex_nesting(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = """
-    SELECT COUNT(*)
-    FROM (
-        SELECT DISTINCT TAIL_NUM
-        FROM Airlines
-        WHERE TAIL_NUM IS NOT NULL
-    ) AS subquery
-    WHERE subquery.TAIL_NUM LIKE 'N%'
-    ;
-    """
+              SELECT COUNT(*)
+              FROM (SELECT DISTINCT TAIL_NUM
+                    FROM Airlines
+                    WHERE TAIL_NUM IS NOT NULL) AS subquery
+              WHERE subquery.TAIL_NUM LIKE 'N%'
+              ; \
+              """
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     expected_sql = ("SELECT COUNT(*) FROM (SELECT DISTINCT TAIL_NUM FROM Airlines "
                     "WHERE NOT TAIL_NUM IS NULL) AS subquery WHERE subquery.TAIL_NUM LIKE 'N%'")
     assert normalized_sql == expected_sql
-    
+
+
 def test_sql_normalization_handles_empty_string(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = ""
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == ""
+
 
 def test_sql_normalization_handles_whitespace_only(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "   \n\t  "
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == ""
 
+
 def test_sql_normalization_handles_single_word(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == "SELECT"
+
 
 def test_sql_normalization_normalizes_case_keywords(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "select * from airlines where tail_num='N956AN'"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == "SELECT * FROM airlines WHERE tail_num = 'N956AN'"
 
+
 def test_test_sql_normalization_handles_multiple_semicolons(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM Airlines;;;"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == "SELECT * FROM Airlines"
+
 
 def test_sql_normalization_preserves_quoted_strings_with_special_chars(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM Airlines WHERE name = 'Air;line\nCorp'"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert "Air;line\nCorp" in normalized_sql
 
+
 def test_sql_normalization_handles_comments(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM Airlines -- this is a comment\nWHERE id = 1"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert "SELECT * FROM Airlines /* this is a comment */ WHERE id = 1" == normalized_sql
+
 
 def test_sql_normalization_handles_malformed_sql_gracefully(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM WHERE"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == raw_sql
 
+
 def test_sql_normalization_handles_unicode_characters(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM Airlines WHERE name = 'Café Αεροπορία'"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert "Café Αεροπορία" in normalized_sql
+
 
 def test_sql_normalization_handles_very_long_query(sqlite_cache_executor: SqliteCacheDB):
     long_where_clause = " OR ".join([f"id = {i}" for i in range(1000)])
@@ -114,21 +125,24 @@ def test_sql_normalization_handles_very_long_query(sqlite_cache_executor: Sqlite
     assert normalized_sql.endswith("id = 999")
     assert not normalized_sql.endswith(";")
 
+
 def test_sql_normalization_handles_nested_quotes(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT * FROM Airlines WHERE description = 'John''s \"favorite\" airline'"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert "John''s \"favorite\" airline" in normalized_sql
 
+
 def test_sql_normalization_handles_cte_queries(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = """
-    WITH airline_stats AS (
-        SELECT COUNT(*) as total FROM Airlines
-    )
-    SELECT * FROM airline_stats;
-    """
+              WITH airline_stats AS (SELECT COUNT(*) as total
+                                     FROM Airlines)
+              SELECT *
+              FROM airline_stats; \
+              """
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert "WITH airline_stats AS" in normalized_sql
     assert not normalized_sql.endswith(";")
+
 
 def test_attributes_with_single_quote_inside(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT name FROM Airlines WHERE name = 'O'Reilly Airlines';"
@@ -136,7 +150,7 @@ def test_attributes_with_single_quote_inside(sqlite_cache_executor: SqliteCacheD
     assert "O'Reilly Airlines" in normalized_sql
 
 
-def test_attribute_belongs_two_tables(sqlite_cache_executor:  SqliteCacheDB):
+def test_attribute_belongs_two_tables(sqlite_cache_executor: SqliteCacheDB):
     raw_sql = "SELECT a.name, code FROM Airlines a JOIN Airports b ON a.code = b.code WHERE a.name = 'Delta';"
     normalized_sql = sqlite_cache_executor.parse_sql_query(raw_sql)
     assert normalized_sql == "SELECT a.name, code FROM Airlines AS a JOIN Airports AS b ON a.code = b.code WHERE a.name = 'Delta'"
@@ -161,6 +175,7 @@ def test_insert_and_fetch_cache(sqlite_cache_executor: SqliteCacheDB):
     cached_result = sqlite_cache_executor.fetch_from_cache(db_id, query)
     assert cached_result == result
 
+
 def test_fetch_nonexistent_cache(sqlite_cache_executor: SqliteCacheDB):
     db_id = "nonexistent_db"
     query = "SELECT * FROM NonExistentTable;"
@@ -168,6 +183,7 @@ def test_fetch_nonexistent_cache(sqlite_cache_executor: SqliteCacheDB):
     # Fetch from cache should return None for non-existent entry
     cached_result = sqlite_cache_executor.fetch_from_cache(db_id, query)
     assert cached_result is None
+
 
 def test_insert_duplicate_ignored(sqlite_cache_executor: SqliteCacheDB):
     db_id = "test_db"
@@ -183,6 +199,39 @@ def test_insert_duplicate_ignored(sqlite_cache_executor: SqliteCacheDB):
     # Fetch from cache
     cached_result = sqlite_cache_executor.fetch_from_cache(db_id, query)
     assert cached_result == result
+
+
+def test_bulk_insert_and_fetch(sqlite_cache_executor: SqliteCacheDB):
+    db_id = "test_db"
+    queries_and_results = [
+        (
+            db_id,
+            "SELECT * FROM Airlines WHERE TAIL_NUM='N956AN';",
+            [("N956AN", "Delta", "DL", "New York", "Los Angeles")]
+        ),
+        (
+            db_id,
+            "SELECT * FROM Airlines WHERE TAIL_NUM='N12345';",
+            [("N12345", "American", "AA", "Chicago", "Miami")]
+        ),
+        (
+            db_id,
+            "SELECT * FROM Airlines WHERE TAIL_NUM='N67890';",
+            [("N67890", "United", "UA", "San Francisco", "Seattle")]
+        )
+    ]
+    db_ids = [db_id for db_id, _, _ in queries_and_results]
+    queries = [q for _, q, _ in queries_and_results]
+    results = [r for _, _, r in queries_and_results]
+    sqlite_cache_executor.insert_bulk_in_cache(db_ids, queries, results)
+
+    # Fetch and verify each entry
+    db_query_present = sqlite_cache_executor.db_id_query_already_present()
+    for db_id, query, expected_result in queries_and_results:
+        assert (db_id, sqlite_cache_executor.parse_sql_query(query)) in db_query_present
+        cached_result = sqlite_cache_executor.fetch_from_cache(db_id, query)
+        assert cached_result == expected_result
+
 
 def test_insert_and_fetch_cache_with_different_queries(sqlite_cache_executor: SqliteCacheDB):
     db_id = "test_db"
@@ -237,7 +286,6 @@ def test_insert_extremely_large_blob_exceeds_sqlite_limit(sqlite_cache_executor:
     # If insertion succeeded, fetch should work
     cached_result = sqlite_cache_executor.fetch_from_cache(db_id, query)
     assert cached_result is None
-
 
 
 def test_insert_empty_result_list(sqlite_cache_executor: SqliteCacheDB):
@@ -426,7 +474,6 @@ def test_high_concurrency_mixed_operations_stress(sqlite_cache_executor: SqliteC
 def test_deadlock_scenario_rapid_inserts(sqlite_cache_executor: SqliteCacheDB):
     """Force potential deadlock with rapid concurrent inserts of different entries."""
     import multiprocessing
-    import time
 
     def rapid_insert_worker(worker_id: int, num_inserts: int):
         executor = SqliteCacheDB.from_uri(relative_base_path=sqlite_cache_executor.engine.url.database)

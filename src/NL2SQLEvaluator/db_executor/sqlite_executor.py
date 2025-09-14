@@ -90,11 +90,12 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
                 is_write = True
             try:
                 with self.connection() as conn:
-                    cursor = conn.execute(query, params)
                     if is_write:
-                        result = []
+                        conn.execute(query, params)
                         conn.commit()
+                        result = []
                     else:
+                        cursor = conn.execute(query, params)
                         rows = cursor.fetchall()
                         result = [row._tuple() for row in rows]
 
@@ -200,6 +201,10 @@ class SqliteCacheDB(SqliteDBExecutor):
         initiated_object.create_cache_table()
         return initiated_object
 
+    def db_id_query_already_present(self) -> set[tuple]:
+        stm = text("SELECT `db_id`, `query` FROM cache_data")
+        return set(self.execute_query(stm))
+
     def create_cache_table(self) -> None:
         """Create the cache table if it does not exist."""
         create_table_sql = """
@@ -228,6 +233,32 @@ class SqliteCacheDB(SqliteDBExecutor):
             self.logger.error(
                 f"Failed to insert into cache for `{db_id}`, `{query}`, error: {e}"
             )
+        return None
+
+    def insert_bulk_in_cache(self, db_ids: list[str], queries: list[str], results: list[list[tuple]]) -> None:
+        if len(queries) != len(results):
+            self.logger.error("Length of queries and results must be the same.")
+            return
+
+        self.logger.debug(f"Inserting {len(queries)} entries in bulk into cache.")
+        to_insert = []
+        for db_id, query, result in zip(db_ids, queries, results):
+            parsed_query = self.parse_sql_query(query)
+            hash_id = hash_db_id_sql(db_id, parsed_query)
+            pickled_result = pickle.dumps(result)
+            to_insert.append({"hash_id": hash_id, "db_id": db_id, "query": parsed_query, "result": pickled_result})
+        stmt = "INSERT OR IGNORE INTO `cache_data` (hash_key, db_id, query, result) VALUES (:hash_id, :db_id, :query, :result)"
+        try:
+            with self.connection() as conn:
+                conn.execute(text(stmt), to_insert)
+                conn.commit()
+        except Exception as e:
+            self.logger.error(
+                f"Failed to insert bulk into cache error: {e}"
+            )
+            self.logger.warning('Bulk failed to insert, trying one by one.')
+            for query, result in zip(queries, results):
+                self.insert_in_cache(db_id, query, result)
         return None
 
     def fetch_from_cache(self, db_id: str, query: str) -> Optional[list[tuple]]:
