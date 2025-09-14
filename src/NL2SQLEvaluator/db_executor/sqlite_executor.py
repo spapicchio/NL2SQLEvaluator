@@ -218,12 +218,22 @@ class SqliteCacheDB(SqliteDBExecutor):
                            """.strip()
         self.execute_query(create_table_sql)
 
+    def _is_hash_id_in_cache(self, hash_id: str) -> bool:
+        stmt = "SELECT 1 FROM `cache_data` WHERE hash_key = :hash_id LIMIT 1"
+        result_row = self.execute_query(query=stmt, params={"hash_id": hash_id})
+        return result_row is not None and len(result_row) > 0
+
     def insert_in_cache(self, db_id: str, query: str, result: list[tuple]) -> None:
         query = self.parse_sql_query(query)
         hash_id = hash_db_id_sql(db_id, query)
         self.logger.debug(
             f"Inserting (or Ignore if duplicate) in cache with hash_id: {hash_id}"
         )
+
+        if self.cache_db is not None and self.cache_db._is_hash_id_in_cache(hash_id):
+            self.logger.info('Skipping insert as already present in cache_db.')
+            return None
+
         pickled_result = pickle.dumps(result)
         hash_id = hash_db_id_sql(db_id, query)
         stmt = "INSERT OR IGNORE INTO `cache_data` (hash_key, db_id, query, result) VALUES (:hash_id, :db_id, :query, :result)"
@@ -238,7 +248,7 @@ class SqliteCacheDB(SqliteDBExecutor):
     def insert_bulk_in_cache(self, db_ids: list[str], queries: list[str], results: list[list[tuple]]) -> None:
         if len(queries) != len(results):
             self.logger.error("Length of queries and results must be the same.")
-            return
+            return None
 
         self.logger.debug(f"Inserting {len(queries)} entries in bulk into cache.")
         to_insert = []
@@ -246,6 +256,9 @@ class SqliteCacheDB(SqliteDBExecutor):
             parsed_query = self.parse_sql_query(query)
             hash_id = hash_db_id_sql(db_id, parsed_query)
             pickled_result = pickle.dumps(result)
+            if self.cache_db is not None and self.cache_db._is_hash_id_in_cache(hash_id):
+                self.logger.info('Skipping insert as already present in cache_db.')
+                continue
             to_insert.append({"hash_id": hash_id, "db_id": db_id, "query": parsed_query, "result": pickled_result})
         stmt = "INSERT OR IGNORE INTO `cache_data` (hash_key, db_id, query, result) VALUES (:hash_id, :db_id, :query, :result)"
         try:
@@ -257,8 +270,9 @@ class SqliteCacheDB(SqliteDBExecutor):
                 f"Failed to insert bulk into cache error: {e}"
             )
             self.logger.warning('Bulk failed to insert, trying one by one.')
-            for query, result in zip(queries, results):
+            for db_id, query, result in zip(db_ids, queries, results):
                 self.insert_in_cache(db_id, query, result)
+
         return None
 
     def fetch_from_cache(self, db_id: str, query: str) -> Optional[list[tuple]]:
@@ -266,6 +280,9 @@ class SqliteCacheDB(SqliteDBExecutor):
         query = self.parse_sql_query(query)
         hash_id = hash_db_id_sql(db_id, query)
         self.logger.debug(f"Fetching from cache with hash_id: {hash_id}")
+        if self.cache_db is not None and self.cache_db._is_hash_id_in_cache(hash_id):
+            self.logger.info('Fetching from cache_db as present in cache_db.')
+            return self.cache_db.fetch_from_cache(db_id, query)
 
         try:
             stmt = "SELECT `result` FROM `cache_data` WHERE hash_key = :hash_id"
