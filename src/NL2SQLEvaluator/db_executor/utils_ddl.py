@@ -84,7 +84,7 @@ def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows:
             row = []
             for col in table.columns:
                 possible_values = col2samples[col.name]
-                row.append(possible_values[i % len(possible_values)])
+                row.append(possible_values[i % len(possible_values)]) if len(possible_values) > 0 else row.append(None)
             sample_rows.append(tuple(row))
         return sample_rows
     except Exception as e:
@@ -105,6 +105,21 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
     Returns:
         str: Modified CREATE TABLE DDL with inline example comments.
     """
+    column_def_re = re.compile(
+        r"""
+        ^\s*
+        (?!PRIMARY\b|FOREIGN\b|UNIQUE\b|CONSTRAINT\b|CHECK\bCREATE\b)   # skip table constraints
+        (?:
+            " (?P<dq>(?:[^"]|"")+ ) "        |   # "quoted", allow "" inside
+            \[ (?P<br>[^\]]+) \]             |   # [bracketed]
+            ` (?P<bq>[^`]+) `                |   # `backticked`
+            (?P<plain>[A-Za-z_][A-Za-z0-9_\$]*)  # unquoted
+        )
+        \s+                                   # space before type
+        [A-Za-z]                              # rudimentary type token start
+        """,
+        re.VERBOSE | re.IGNORECASE,
+    )
 
     sample_rows = list(_utils_select_not_null_samples(table, execute_fn, num_rows=num_rows))
     if len(sample_rows) == 0:
@@ -127,16 +142,24 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
         #   (\w+)          -> column name (captured)
         #   \1             -> optional matching closing quote/backtick/bracket
         #   \s+[\w\(\)]+.* -> at least one space, then the type and the rest of the line
-        match = re.match(r"\s*([`\"\[]?)(\w+)\1\s+[\w\(\)]+.*", line)
-        if match:
-            col_name = match.group(2)
-            if col_name in col_examples:
-                if line.rstrip().endswith(","):
-                    line = line.rstrip()[:-1]
-                    line += f" -- {col_examples[col_name]},"
-                else:
-                    line += f" -- {col_examples[col_name]}"
+        m = column_def_re.match(line)
+        if not m:
+            new_lines.append(line)
+            continue
+
+        # Pick whichever group matched
+        col_name = next(g for g in (m.group("dq"), m.group("br"), m.group("bq"), m.group("plain")) if g)
+        # Unescape doubled quotes if any (SQL standard)
+        if m.lastgroup == "dq":
+            col_name = col_name.replace('""', '"')
+
+        if col_name in col_examples:
+            if line.rstrip().endswith(","):
+                line = line.rstrip()[:-1] + f" -- {col_examples[col_name]},"
+            else:
+                line = line.rstrip() + f" -- {col_examples[col_name]}"
         new_lines.append(line)
+
     return "\n".join(new_lines)
 
 
@@ -168,5 +191,3 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
 
     inserts = "\n".join(inserts)
     return f"{ddl}\n{inserts}" if inserts else ddl
-
-
