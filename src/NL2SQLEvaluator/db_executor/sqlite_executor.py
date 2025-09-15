@@ -309,3 +309,11 @@ class SqliteCacheDB(SqliteDBExecutor):
         except Exception as e:
             self.logger.error(f"Failed to parse SQL query: {query}, error: {e}")
             return query
+
+
+
+if __name__ == "__main__":
+    db = SqliteDBExecutor.from_uri(
+        relative_base_path='data/bird/train_databases/address/address.sqlite'
+    )
+    print(db.get_ddl_database(add_sample_rows_strategy='inline'))

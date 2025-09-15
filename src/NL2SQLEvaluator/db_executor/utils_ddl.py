@@ -11,9 +11,11 @@ target database, keeping this module independent of any specific DB executor.
 """
 
 import re
+from collections import defaultdict
 from typing import Callable, Literal, Optional
 
 from sqlalchemy import insert, Dialect
+from sqlalchemy.sql.expression import select
 from sqlalchemy.sql.schema import Table
 
 
@@ -23,7 +25,7 @@ def utils_augment_ddl(
         execute_fn: Callable,
         dialect: Dialect,
         strategy: Optional[Literal["append", "inline"]] = None,
-        num_rows: int = 1):
+        num_rows: int = 3):
     """Augment a DDL string with example data, either inline or appended.
 
     Depending on `strategy`, this function will:
@@ -53,7 +55,7 @@ def utils_augment_ddl(
     return ddl
 
 
-def _utils_select_rows_from(table: Table, execute_fn: Callable, num_rows: int = 1, ):
+def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows: int = 3, ):
     """Fetch sample rows from a table using the provided execution function.
 
     Args:
@@ -70,13 +72,24 @@ def _utils_select_rows_from(table: Table, execute_fn: Callable, num_rows: int = 
         Any: Result of `execute_fn`, expected to be an iterable of rows.
     """
     try:
-        sample_rows_result = execute_fn(
-            query=f"SELECT * FROM `{table.name}` LIMIT {num_rows}",
-        )
+        col2samples = defaultdict(list)
+        for col in table.columns:
+            # all non-NULL values (duplicates kept)
+            stmt = select(col).distinct().where(col.is_not(None)).limit(num_rows)
+            col2samples[col.name] = [val[0] for val in execute_fn(stmt)]
+
+        # apply transpose to get rows
+        sample_rows = []
+        for i in range(num_rows):
+            row = []
+            for col in table.columns:
+                possible_values = col2samples[col.name]
+                row.append(possible_values[i % len(possible_values)])
+            sample_rows.append(tuple(row))
+        return sample_rows
     except Exception as e:
         # Re-raise to let callers decide how to handle failures during sampling.
         return []
-    return sample_rows_result
 
 
 def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable, num_rows: int = 1):
@@ -93,14 +106,14 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
         str: Modified CREATE TABLE DDL with inline example comments.
     """
 
-    sample_rows = list(_utils_select_rows_from(table, execute_fn, num_rows=num_rows))
+    sample_rows = list(_utils_select_not_null_samples(table, execute_fn, num_rows=num_rows))
     if len(sample_rows) == 0:
         return ddl
 
     col_examples = {}
     for idx, col in enumerate(table.columns):
         # truncate long values for readability in comments
-        examples = {str(row[idx])[:100] for row in sample_rows if row[idx] is not None}
+        examples = {str(row[idx])[:50] for row in sample_rows if row[idx] is not None}
         if examples:
             col_examples[col.name] = f"Example Values: {tuple(examples)}"
 
@@ -141,12 +154,12 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
     Returns:
         str: One INSERT statement per sampled row.
     """
-    sample_rows = list(_utils_select_rows_from(table, execute_fn, num_rows=num_rows))
+    sample_rows = list(_utils_select_not_null_samples(table, execute_fn, num_rows=num_rows))
 
     inserts = []
     for row in sample_rows:
         # Truncate long values for readability in generated INSERTs.
-        row = [str(i)[:100] for i in row]
+        row = [str(i)[:50] for i in row]
         stmt = insert(table).values(dict(zip(table.columns.keys(), row)))
         compiled = stmt.compile(
             dialect=dialect, compile_kwargs={"literal_binds": True}
@@ -155,3 +168,5 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
 
     inserts = "\n".join(inserts)
     return f"{ddl}\n{inserts}" if inserts else ddl
+
+

@@ -329,7 +329,7 @@ class BaseSQLDBExecutor(ABC):
                     execute_fn=self.execute_query,
                     dialect=conn.dialect,
                     strategy=add_sample_rows_strategy,
-                    num_rows=1
+                    num_rows=2
                 )
 
                 tables.append(table_info)
