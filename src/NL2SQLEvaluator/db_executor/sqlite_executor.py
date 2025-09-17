@@ -40,7 +40,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
             raise FileNotFoundError(f"SQLite database file not found at {db_path}")
         uri = f"sqlite:///{db_path}?mode=ro&nolock=1&check_same_thread=false&immutable=1"
         # uri = f"sqlite:///{db_path}?check_same_thread=false&immutable=1"
-        logger.info(f"Connecting to SQLite database with URI {uri}")
+        logger.debug(f"Connecting to SQLite database with URI {uri}")
         engine = create_engine(uri,
                                # echo=True, echo_pool=True,
                                pool_size=20, max_overflow=40,
@@ -187,7 +187,7 @@ class SqliteCacheDB(SqliteDBExecutor):
         if not os.path.exists(db_path):
             raise FileNotFoundError(f"SQLite database file not found at {db_path}")
         uri = f"sqlite:///{db_path}?mode=rwc&cache=shared&check_same_thread=false"
-        logger.info(f"Connecting to SQLite database with URI {uri}")
+        logger.debug(f"Connecting to SQLite database with URI {uri}")
         engine = create_engine(uri,
                                # echo=True, echo_pool=True,
                                pool_size=20, max_overflow=40,
@@ -234,7 +234,7 @@ class SqliteCacheDB(SqliteDBExecutor):
         hash_id = hash_db_id_sql(db_id, query)
 
         if self._is_id_already_present(hash_id):
-            self.logger.info('Skipping insert as already present in cache_db.')
+            self.logger.debug('Skipping insert as already present in cache_db.')
             return None
 
         self.logger.debug(
@@ -264,7 +264,7 @@ class SqliteCacheDB(SqliteDBExecutor):
             hash_id = hash_db_id_sql(db_id, parsed_query)
             pickled_result = pickle.dumps(result)
             if self._is_id_already_present(hash_id):
-                self.logger.info('Skipping insert as already present in cache_db.')
+                self.logger.debug('Skipping insert as already present in cache_db.')
                 continue
             to_insert.append({"hash_id": hash_id, "db_id": db_id, "query": parsed_query, "result": pickled_result})
 
@@ -289,7 +289,7 @@ class SqliteCacheDB(SqliteDBExecutor):
         hash_id = hash_db_id_sql(db_id, query)
         self.logger.debug(f"Fetching from cache with hash_id: {hash_id}")
         if self.cache_db is not None and self.cache_db._is_id_already_present(hash_id):
-            self.logger.info('Fetching from cache_db as present in cache_db.')
+            self.logger.debug('Fetching from cache_db as present in cache_db.')
             return self.cache_db.fetch_from_cache(db_id, query)
 
         try:

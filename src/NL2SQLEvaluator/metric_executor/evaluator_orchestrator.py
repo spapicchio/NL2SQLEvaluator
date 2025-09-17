@@ -208,7 +208,7 @@ def _cache_pairs(
             to_cache_results.append(r)
 
     if to_cache_queries:
-        logger.info("Storing executed queries in cache")
+        logger.debug("Storing executed queries in cache")
         eng.cache_db.insert_bulk_in_cache(
             db_ids=[eng.db_id] * len(to_cache_queries),
             queries=to_cache_queries,
