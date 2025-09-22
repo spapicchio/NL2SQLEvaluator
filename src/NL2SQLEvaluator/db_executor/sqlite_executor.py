@@ -51,7 +51,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
                                pool_pre_ping=True,
                                pool_recycle=1800)
         logger.warning(f"Created ENGINE for high concurrency read settings but NO WRITE.")
-        return cls(engine=engine, cache_db=None)
+        return cls(engine=engine, cache_db=None, *args, **kwargs)
 
     def _install_pragmas_listener(self) -> None:
         """Attach a connect-time callback to *this* engine instance."""

@@ -303,3 +303,14 @@ class TestSqliteDBExecutor:
         """Test PRAGMA installation listener."""
         executor = SqliteDBExecutor.from_uri(relative_base_path=temp_db)
         mock_listens_for.assert_called()
+
+
+    def test_create_db_index(self):
+        executor = SqliteDBExecutor.from_uri(
+            relative_base_path='data/bird/train_databases/address/address.sqlite',
+            path_for_bm25_index='bm25_test_index'
+        )
+
+        retriever = executor.get_index_db()
+        assert retriever is not None
+

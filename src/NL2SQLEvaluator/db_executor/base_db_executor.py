@@ -19,15 +19,21 @@ External API:
 """
 
 import logging
+import os
+import re
 from abc import ABC, abstractmethod
-from typing import Optional, Literal
+from decimal import Decimal
+from typing import Optional, Literal, Any
 
+import bm25s
+import sqlalchemy as sa
 from langgraph.func import task
 from sqlalchemy import Engine, inspect, MetaData
 from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
-from sqlalchemy.sql.sqltypes import NullType
+from sqlalchemy.sql.sqltypes import NullType, String, Text
 
+from NL2SQLEvaluator.db_executor.utils_create_bm25_index import create_bm25_index
 from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.orchestrator_state import SQLInstance, SingleTask
@@ -101,6 +107,7 @@ class BaseSQLDBExecutor(ABC):
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
                  save_in_cache=False,
+                 path_for_bm25_index: Optional[str] = None,
                  *args,
                  **kwargs):
         self.engine = engine
@@ -113,6 +120,8 @@ class BaseSQLDBExecutor(ABC):
         if not self.table_names:
             self.logger.warning(f"No tables found in database at {self.engine_url}.")
         self.save_in_cache = save_in_cache
+        self.path_for_bm25_index = os.path.join(path_for_bm25_index, self.db_id) if path_for_bm25_index else None
+        self._index_db = None
 
     # -----------------
     # Properties
@@ -356,3 +365,117 @@ class BaseSQLDBExecutor(ABC):
             self.dispose()
         except Exception:
             pass  # Ignore errors during cleanup
+
+    @property
+    def index_db(self):
+        def _looks_numeric(val: Any) -> bool:
+            """Return True if val is numeric or a numeric-looking string (incl. negatives, decimals)."""
+            if isinstance(val, (int, float, Decimal)):
+                return True
+            if val is None:
+                return False
+            s = str(val).strip()
+            if s == "":
+                return False
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        def _normalize(s: str) -> str:
+            """Lowercase, collapse whitespace, trim, and cap length to 40 chars."""
+            s = str(s).strip()
+            s = _ws_collapse.sub(" ", s).lower()
+            return s[:40]
+
+        """
+        Build BM25 retrievers for categorical (string-ish) columns.
+        Skips SQLite system tables, NULL/empty strings, and numeric-looking values.
+        """
+        if self._index_db is not None:
+            return self._index_db
+
+        self.logger.info("Building BM25 indexes for categorical columns")
+        _ws_collapse = re.compile(r"\s+")
+
+        # Filter out SQLite internal tables
+
+        meta_tables = [
+            tbl for tbl in self.metadata.sorted_tables
+            if not (self.dialect == "sqlite" and tbl.name.startswith("sqlite_"))
+        ]
+
+        tables2indexes: dict[str, dict[str, Any]] = {}
+
+        # Treat only text columns as candidates (String/Text and variants)
+        stringish = (String, Text)
+
+        for table in meta_tables:
+            col_indexes: dict[str, Any] = {}
+
+            for col in table.columns:
+                # Only index string-like columns
+                if not isinstance(getattr(col, "type", None), stringish):
+                    continue
+
+                # DISTINCT normalized values directly in SQL where possible
+                # - Trim and guard against NULL/empty
+                # - Left-substring to 40 chars to bound memory early
+                # Some dialects lack SUBSTR/LTRIM; fall back to Python if needed.
+                substr = sa.func.substr(col, 1, 40)
+                trimmed = sa.func.trim(substr)
+                stmt = (
+                    sa.select(sa.func.distinct(trimmed))
+                    .where(sa.and_(col.is_not(None), trimmed != ""))
+                    .limit(5000)
+                )
+
+                try:
+                    # Expect rows like [(value,), (value,), ...]
+                    rows = self.execute_query(stmt)
+                    values = [r[0] for r in rows if r and r[0] is not None]
+                except Exception:
+                    # Fallback path if the SQL functions aren’t supported by the dialect
+                    rows = self.execute_query(sa.select(col).distinct().where(col.is_not(None)).limit(5000))
+                    values = [str(r[0])[:40].strip() for r in rows if
+                              r and r[0] is not None and str(r[0]).strip() != ""]
+
+                # Filter out numeric-looking items and normalize
+                corpus = [_normalize(v) for v in values if v != "" and not _looks_numeric(v)]
+
+                # Deduplicate after normalization
+                corpus = list({v for v in corpus if v})
+
+                if not corpus:
+                    continue
+
+                # Ensure index path exists
+                index_path = os.path.join(self.path_for_bm25_index, table.name, col.name)
+                # Build the retriever
+                retriever = create_bm25_index(corpus, index_path)
+                col_indexes[col.name] = retriever
+
+            if col_indexes:
+                tables2indexes[table.name] = col_indexes
+
+        self._index_db = tables2indexes
+        return self._index_db
+
+    def retrieve_similar_col_values_from_db_index(self, query, column_name, table_name, top_k=2):
+        """
+        Retrieve similar column values from the BM25 index for a given query.
+
+        Args:
+            query (str): The input query string to search for similar values.
+            column_name (str): The name of the column to search within.
+            table_name (str): The name of the table containing the column.
+            top_k (int): The number of top similar values to retrieve.
+
+        Returns:
+            list[str]: A list of similar column values.
+        """
+        retriever = self.index_db[table_name][column_name]
+        docs = retriever.retrieve(bm25s.tokenize(query), k=top_k)
+        docs = [doc['text'] if isinstance(doc, dict) else doc for doc in docs[0]]
+        return docs
