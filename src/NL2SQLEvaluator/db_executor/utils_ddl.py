@@ -19,7 +19,7 @@ from sqlalchemy.sql.expression import select
 from sqlalchemy.sql.schema import Table
 
 
-def utils_augment_ddl(
+def utils_augment_ddl_tbl(
         ddl: str,
         table: Table,
         execute_fn: Callable,

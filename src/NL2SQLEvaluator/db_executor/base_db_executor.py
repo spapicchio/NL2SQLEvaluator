@@ -33,8 +33,8 @@ from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
 from sqlalchemy.sql.sqltypes import NullType, String, Text
 
-from NL2SQLEvaluator.db_executor.utils_create_bm25_index import create_bm25_index
-from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
+from NL2SQLEvaluator.db_executor.utils_create_bm25_index import create_bm25_index, retrieve_from_bm25_index
+from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl_tbl
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.orchestrator_state import SQLInstance, SingleTask
 
@@ -332,7 +332,7 @@ class BaseSQLDBExecutor(ABC):
                 )
                 table_info = f"{create_table.rstrip()}"
 
-                table_info = utils_augment_ddl(
+                table_info = utils_augment_ddl_tbl(
                     ddl=table_info,
                     table=table,
                     execute_fn=self.execute_query,
