@@ -2,7 +2,7 @@
 from sqlalchemy import MetaData, Table, Column, Integer, String, Text
 from sqlalchemy.dialects.sqlite import dialect as SQLiteDialect
 
-from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
+from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl_tbl
 
 
 def test_returns_original_ddl_when_strategy_is_none():
@@ -10,7 +10,7 @@ def test_returns_original_ddl_when_strategy_is_none():
     metadata = MetaData()
     table = Table("t", metadata, Column("id", Integer))
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=lambda **kwargs: [(1,)],
@@ -27,7 +27,7 @@ def test_returns_original_ddl_when_unknown_strategy():
     metadata = MetaData()
     table = Table("t", metadata, Column("id", Integer))
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=lambda **kwargs: [(1,)],
@@ -62,7 +62,7 @@ def test_inline_injects_example_comments_for_columns_with_non_null_samples_and_p
         (2, "bob", None),
     ]
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=lambda **kwargs: rows,
@@ -97,7 +97,7 @@ def test_inline_returns_original_when_no_samples():
         Column("name", String(100)),
     )
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=lambda **kwargs: [],
@@ -117,7 +117,7 @@ def test_same_ddl_when_execute_fn_raises_error():
     def failing_execute_fn(**kwargs):
         raise RuntimeError("DB error")
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=failing_execute_fn,
@@ -151,7 +151,7 @@ def test_append_appends_insert_statements_for_each_row_with_literal_values_and_t
         (2, "bob", long_text),
     ]
 
-    result = utils_augment_ddl(
+    result = utils_augment_ddl_tbl(
         ddl=ddl,
         table=table,
         execute_fn=lambda **kwargs: rows,

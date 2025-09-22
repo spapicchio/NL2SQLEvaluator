@@ -17,18 +17,23 @@ External API:
   - BaseSQLDBExecutor.db_id
   - BaseSQLDBExecutor.inspector
 """
-
 import logging
+import os
 from abc import ABC, abstractmethod
-from typing import Optional, Literal
+from pathlib import Path
+from typing import Optional, Literal, Any
 
+import bm25s
+import pandas as pd
+import sqlalchemy as sa
 from langgraph.func import task
 from sqlalchemy import Engine, inspect, MetaData
 from sqlalchemy import sql
 from sqlalchemy.sql.ddl import CreateTable
-from sqlalchemy.sql.sqltypes import NullType
+from sqlalchemy.sql.sqltypes import NullType, String, Text
 
-from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl
+from NL2SQLEvaluator.db_executor.utils_create_bm25_index import create_bm25_index, retrieve_from_bm25_index
+from NL2SQLEvaluator.db_executor.utils_ddl import utils_augment_ddl_tbl
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.orchestrator_state import SQLInstance, SingleTask
 
@@ -97,13 +102,17 @@ class BaseSQLDBExecutor(ABC):
 
     def __init__(self,
                  engine: Engine,
+                 relative_base_path: Path | str,
                  cache_db: Optional["BaseSQLDBExecutor"] = None,
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
                  save_in_cache=False,
+                 path_for_bm25_index: str = '.nl2sql_evaluator_cache/bm25_index',
+                 path_tables_info_json: Optional[str] = None,
                  *args,
                  **kwargs):
         self.engine = engine
+        self.relative_base_path = relative_base_path if isinstance(relative_base_path, Path) else Path(relative_base_path)
         self.cache_db = cache_db
         self.logger = logger or get_logger(name=__name__, level="INFO")
         self.timeout = timeout
@@ -113,6 +122,12 @@ class BaseSQLDBExecutor(ABC):
         if not self.table_names:
             self.logger.warning(f"No tables found in database at {self.engine_url}.")
         self.save_in_cache = save_in_cache
+        self.path_for_bm25_index = os.path.join(path_for_bm25_index, self.db_id) if path_for_bm25_index else None
+        self._index_db = None
+        self.path_tables_info_json = Path(path_tables_info_json) if path_tables_info_json else self.relative_base_path.parent.parent.parent / "tables.json"
+        if self.path_tables_info_json and not self.path_tables_info_json.suffix == ".json":
+            raise ValueError(f"path_tables_info_json should be a json file. Got {self.path_tables_info_json}")
+        self.tbl2col2descr = self._prepare_schema_filter_data()
 
     # -----------------
     # Properties
@@ -273,6 +288,29 @@ class BaseSQLDBExecutor(ABC):
             self.metadata.reflect(bind=conn)
         return self.metadata
 
+    def _prepare_schema_filter_data(self) -> dict[str, dict[str, str]]:
+        if self.path_tables_info_json is None or not self.path_tables_info_json.exists():
+            return {}
+
+        db_info = pd.read_json(self.path_tables_info_json)
+        db_info = db_info[db_info.db_id == self.db_id]
+        if db_info.empty:
+            self.logger.warning(f"No table info found for db_id {self.db_id} in {self.path_tables_info_json}")
+            return {}
+
+        tbl2col2descr = {}
+        table_names_original = db_info["table_names_original"].values[0]
+        column_names_original = db_info["column_names_original"].values[0]
+        column_names = db_info["column_names"].values[0]
+        for outer_table_idx, table_name_original in enumerate(table_names_original):
+            tbl2col2descr[table_name_original] = {}
+            for (inner_table_idx, column_name_original), (_, column_comment) in zip(column_names_original,
+                                                                                    column_names):
+                if outer_table_idx == inner_table_idx and column_name_original != column_comment:
+                    tbl2col2descr[table_name_original][column_name_original] = column_comment
+
+        return tbl2col2descr
+
     # -----------------
     # Table Info Helpers
     # -----------------
@@ -280,6 +318,7 @@ class BaseSQLDBExecutor(ABC):
             self,
             table_names: Optional[list[str]] = None,
             add_sample_rows_strategy: Optional[Literal["append", "inline"]] = None,
+            question: Optional[str] = None,
     ) -> str:
         """Build a string with DDL for specified tables and optional sample rows.
 
@@ -289,6 +328,7 @@ class BaseSQLDBExecutor(ABC):
                 * `"inline"`: Append example values as comments next to columns.
                 * `"append"`: Append INSERT statements with sampled rows.
                 * `None`: Do not include sample data.
+            question: Optional question string to guide sample data selection.
 
         Returns:
             str: Formatted DDL sections with optional sample data.
@@ -314,22 +354,37 @@ class BaseSQLDBExecutor(ABC):
         ]
 
         for table in meta_tables:
+            tbl_index = None
+            if question:
+                if table.name in self.index_db:
+                    tbl_index = self.index_db[table.name]
+
+            col2values_sim_quest = {} if question else None
             for k, v in table.columns.items():
                 if type(v.type) is NullType:
                     table._columns.remove(v)
+                if tbl_index and k in tbl_index:
+                    col2values_sim_quest[k] = retrieve_from_bm25_index(
+                        query=question,
+                        retriever=tbl_index[k],
+                        top_k=3
+                    )
+
             with self.engine.connect() as conn:
                 create_table = str(
                     CreateTable(table).compile(dialect=conn.dialect)
                 )
                 table_info = f"{create_table.rstrip()}"
 
-                table_info = utils_augment_ddl(
+                table_info = utils_augment_ddl_tbl(
                     ddl=table_info,
                     table=table,
                     execute_fn=self.execute_query,
                     dialect=conn.dialect,
                     strategy=add_sample_rows_strategy,
-                    num_rows=2
+                    num_rows=2,
+                    col2values_sim_quest=col2values_sim_quest,
+                    col2descr=self.tbl2col2descr.get(table.name, {}),
                 )
 
                 tables.append(table_info)
@@ -356,3 +411,87 @@ class BaseSQLDBExecutor(ABC):
             self.dispose()
         except Exception:
             pass  # Ignore errors during cleanup
+
+    @property
+    def index_db(self) -> dict[str, dict[str, Any]]:
+        """
+        Build BM25 retrievers for categorical (string-ish) columns.
+        Skips SQLite system tables, NULL/empty strings, and numeric-looking values.
+        """
+        if self._index_db is not None:
+            return self._index_db
+
+        self.logger.info("Building BM25 indexes for categorical columns")
+
+        # Filter out SQLite internal tables
+
+        meta_tables = [
+            tbl for tbl in self.metadata.sorted_tables
+            if not (self.dialect == "sqlite" and tbl.name.startswith("sqlite_"))
+        ]
+
+        tables2indexes: dict[str, dict[str, Any]] = {}
+
+        # Treat only text columns as candidates (String/Text and variants)
+        stringish = (String, Text)
+
+        for table in meta_tables:
+            col_indexes: dict[str, Any] = {}
+
+            for col in table.columns:
+                # Only index string-like columns
+                if not isinstance(getattr(col, "type", None), stringish):
+                    continue
+
+                # DISTINCT normalized values directly in SQL where possible
+                # - Trim and guard against NULL/empty
+                # - Left-substring to 40 chars to bound memory early
+                # Some dialects lack SUBSTR/LTRIM; fall back to Python if needed.
+                substr = sa.func.substr(col, 1, 40)
+                trimmed = sa.func.trim(substr)
+                stmt = (
+                    sa.select(sa.func.distinct(trimmed))
+                    .where(sa.and_(col.is_not(None), trimmed != ""))
+                    .limit(5000)
+                )
+
+                try:
+                    # Expect rows like [(value,), (value,), ...]
+                    rows = self.execute_query(stmt)
+                    values = [r[0] for r in rows if r and r[0] is not None]
+                except Exception:
+                    # Fallback path if the SQL functions aren’t supported by the dialect
+                    rows = self.execute_query(sa.select(col).distinct().where(col.is_not(None)).limit(5000))
+                    values = [str(r[0])[:40].strip() for r in rows if
+                              r and r[0] is not None and str(r[0]).strip() != ""]
+
+                # Ensure index path exists
+                index_path = os.path.join(self.path_for_bm25_index, table.name, col.name)
+                # Build the retriever
+                retriever = create_bm25_index(values, index_path)
+                if retriever:
+                    col_indexes[col.name] = retriever
+
+            if col_indexes:
+                tables2indexes[table.name] = col_indexes
+
+        self._index_db = tables2indexes
+        return self._index_db
+
+    def retrieve_similar_col_values_from_db_index(self, query, column_name, table_name, top_k=2):
+        """
+        Retrieve similar column values from the BM25 index for a given query.
+
+        Args:
+            query (str): The input query string to search for similar values.
+            column_name (str): The name of the column to search within.
+            table_name (str): The name of the table containing the column.
+            top_k (int): The number of top similar values to retrieve.
+
+        Returns:
+            list[str]: A list of similar column values.
+        """
+        retriever = self.index_db[table_name][column_name]
+        docs = retriever.retrieve(bm25s.tokenize(query), k=top_k)
+        docs = [doc['text'] if isinstance(doc, dict) else doc for doc in docs[0]]
+        return docs

@@ -19,12 +19,15 @@ from sqlalchemy.sql.expression import select
 from sqlalchemy.sql.schema import Table
 
 
-def utils_augment_ddl(
+def utils_augment_ddl_tbl(
         ddl: str,
         table: Table,
         execute_fn: Callable,
         dialect: Dialect,
         strategy: Optional[Literal["append", "inline"]] = None,
+        col2values_sim_quest: Optional[dict[str, list[str]]] = None,
+        augment_fk_constraints: bool = True,
+        col2descr: Optional[dict] = None,
         num_rows: int = 3):
     """Augment a DDL string with example data, either inline or appended.
 
@@ -41,21 +44,29 @@ def utils_augment_ddl(
         dialect (Dialect): SQLAlchemy dialect for compiling INSERT statements.
         strategy (Optional[Literal["append", "inline"]]): Augmentation strategy.
         num_rows (int): Number of rows to sample for examples.
+        col2values_sim_quest (Optional[dict[str, list[str]]]): Optional mapping of column names to sample values
+            provided by an external source. If provided, these values will be used for sampling instead of querying the database.
+        col2descr (Optional[dict]): Optional mapping of column names to descriptions.
+        augment_fk_constraints (bool): Whether to augment foreign key constraints with standardized names.
 
     Returns:
         str: The augmented DDL string.
     """
     if strategy is None:
-        return ddl
+        pass
     elif strategy == "inline":
-        return _utils_augment_ddl_inline_rows(ddl, table, execute_fn, num_rows)
+        ddl = _utils_augment_ddl_inline_rows(ddl, table, execute_fn, num_rows, col2values_sim_quest, col2descr)
     elif strategy == "append":
-        return _utils_augment_ddl_append_rows(ddl, table, execute_fn, dialect, num_rows)
+        ddl = _utils_augment_ddl_append_rows(ddl, table, execute_fn, dialect, num_rows, col2values_sim_quest)
+
+    if augment_fk_constraints:
+        ddl = _utils_augment_fk_table_name(ddl, table)
 
     return ddl
 
 
-def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows: int = 3, ):
+def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows: int = 3,
+                                   col2values_sim_quest: Optional[dict[str, list[str]]] = None):
     """Fetch sample rows from a table using the provided execution function.
 
     Args:
@@ -63,6 +74,8 @@ def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows:
         execute_fn (Callable): Callable used to execute SQL and fetch rows.
             It should accept keyword argument `query` with a SQL string.
         num_rows (int): Number of rows to retrieve.
+        col2values_sim_quest (Optional[dict[str, list[str]]]): Optional mapping of column names to sample values
+            provided by an external source. If provided, these values will be used for sampling instead of querying the database.
 
     Notes:
         If `execute_fn` raises an exception, this function will catch it and return an empty list.
@@ -74,6 +87,11 @@ def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows:
     try:
         col2samples = defaultdict(list)
         for col in table.columns:
+            if col2values_sim_quest and col.name in col2values_sim_quest:
+                # use provided sample values from sim_quest
+                col2samples[col.name] = col2values_sim_quest[col.name][:num_rows]
+                continue
+
             # all non-NULL values (duplicates kept)
             stmt = select(col).distinct().where(col.is_not(None)).limit(num_rows)
             col2samples[col.name] = [val[0] for val in execute_fn(stmt)]
@@ -92,7 +110,9 @@ def _utils_select_not_null_samples(table: Table, execute_fn: Callable, num_rows:
         return []
 
 
-def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable, num_rows: int = 1):
+def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable, num_rows: int = 1,
+                                   col2values_sim_quest: Optional[dict[str, list[str]]] = None,
+                                   col2descr: Optional[dict] = None) -> str:
     """
     Inject example values as inline comments into a CREATE TABLE statement.
 
@@ -101,6 +121,10 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
         table (Table): SQLAlchemy table to sample from.
         execute_fn (Callable): Function to execute SQL queries.
         num_rows (int): Number of rows to inspect for examples.
+        col2values_sim_quest (Optional[dict[str, list[str]]]): Optional mapping of column names to sample values
+            provided by an external source. If provided, these values will be used for sampling instead of
+            querying the database.
+        col2descr (Optional[dict]): Optional mapping of column names to descriptions.
 
     Returns:
         str: Modified CREATE TABLE DDL with inline example comments.
@@ -121,7 +145,9 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
         re.VERBOSE | re.IGNORECASE,
     )
 
-    sample_rows = list(_utils_select_not_null_samples(table, execute_fn, num_rows=num_rows))
+    sample_rows = list(
+        _utils_select_not_null_samples(table, execute_fn, num_rows=num_rows, col2values_sim_quest=col2values_sim_quest)
+    )
     if len(sample_rows) == 0:
         return ddl
 
@@ -130,7 +156,10 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
         # truncate long values for readability in comments
         examples = {str(row[idx])[:50] for row in sample_rows if row[idx] is not None}
         if examples:
-            col_examples[col.name] = f"Example Values: {tuple(examples)}"
+            if col.name in col2descr and col2descr[col.name]:
+                col_examples[col.name] = f"{col2descr[col.name]}, example: {list(examples)}"
+            else:
+                col_examples[col.name] = f"example: {list(examples)}"
 
     ddl_lines = ddl.splitlines()
     new_lines = []
@@ -163,7 +192,8 @@ def _utils_augment_ddl_inline_rows(ddl: str, table: Table, execute_fn: Callable,
     return "\n".join(new_lines)
 
 
-def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable, dialect: Dialect, num_rows: int = 1):
+def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable, dialect: Dialect, num_rows: int = 1,
+                                   col2values_sim_quest: Optional[dict[str, list[str]]] = None):
     """
     Render INSERT statements with sampled rows for a table.
 
@@ -177,7 +207,8 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
     Returns:
         str: One INSERT statement per sampled row.
     """
-    sample_rows = list(_utils_select_not_null_samples(table, execute_fn, num_rows=num_rows))
+    sample_rows = list(
+        _utils_select_not_null_samples(table, execute_fn, num_rows=num_rows, col2values_sim_quest=col2values_sim_quest))
 
     inserts = []
     for row in sample_rows:
@@ -191,3 +222,22 @@ def _utils_augment_ddl_append_rows(ddl: str, table: Table, execute_fn: Callable,
 
     inserts = "\n".join(inserts)
     return f"{ddl}\n{inserts}" if inserts else ddl
+
+
+def _utils_augment_fk_table_name(ddl: str, table: Table) -> str:
+    def _internal(line_ddl_fk):
+        src = table.name
+        m = re.search(
+            r'FOREIGN\s+KEY\s*\([^)]+\)\s*REFERENCES\s+([`"\[]?)([^`"\[\]\s(]+(?:\.[^`"\[\]\s(]+)?)\1',
+            line_ddl_fk,
+            flags=re.IGNORECASE
+        )
+        if not m:
+            return line_ddl_fk
+        # Extract and normalize the referenced table name
+        dest_raw = m.group(2)  # may be schema-qualified like main.schools
+        dest_simple = dest_raw.split('.')[-1].strip().strip('`"[]')
+        line_ddl_fk = f"\tCONSTRAINT fk_{src.lower().replace(" ", "_")}_{dest_simple.lower().replace(" ", "_")} {line_ddl_fk.strip()}"
+        return line_ddl_fk
+
+    return "\n".join([_internal(line) for line in ddl.splitlines()])
