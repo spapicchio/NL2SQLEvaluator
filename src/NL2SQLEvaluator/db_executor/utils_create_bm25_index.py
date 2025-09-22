@@ -1,7 +1,42 @@
+import re
+from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import bm25s
+
+_ws_collapse = re.compile(r"\s+")
+
+
+def _looks_numeric(val: Any) -> bool:
+    """Return True if val is numeric or a numeric-looking string (incl. negatives, decimals)."""
+    if isinstance(val, (int, float, Decimal)):
+        return True
+    if val is None:
+        return False
+    s = str(val).strip()
+    if s == "":
+        return False
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _normalize(s: str) -> str:
+    """Lowercase, collapse whitespace, trim, and cap length to 40 chars."""
+    s = str(s).strip()
+    s = _ws_collapse.sub(" ", s).lower()
+    return s[:40]
+
+
+def _process_corpus(corpus: list[str]) -> list[str]:
+    # Filter out numeric-looking items and normalize
+    corpus = [_normalize(v) for v in corpus if v != "" and not _looks_numeric(v)]
+    # Deduplicate after normalization
+    corpus = list({v for v in corpus if v})
+    return corpus
 
 
 def create_bm25_index(corpus: list[str], path_for_bm25_index: Optional[str] = None):
@@ -11,8 +46,14 @@ def create_bm25_index(corpus: list[str], path_for_bm25_index: Optional[str] = No
         retriever = bm25s.BM25.load(path, load_corpus=True)
 
     else:
+        corpus = _process_corpus(corpus)
+        if len(corpus) == 0:
+            return None
         retriever = bm25s.BM25(corpus=corpus)
-        retriever.index(bm25s.tokenize(corpus))
+        tokenized = bm25s.tokenize(corpus)
+        if len(tokenized.vocab) == 0:
+            return None
+        retriever.index(tokenized)
         if path is not None:
             # Save the index to disk
             path.mkdir(parents=True, exist_ok=True)
@@ -20,20 +61,18 @@ def create_bm25_index(corpus: list[str], path_for_bm25_index: Optional[str] = No
     return retriever
 
 
-def retrieve_from_bm25_index(query: str, retriever, top_k=2):
+def retrieve_from_bm25_index(query: str, retriever: bm25s.BM25, top_k=2):
     # Load the BM25 model and index the corpus
     if top_k <= 0:
         raise ValueError("k must be a positive integer")
-    if top_k > len(corpus):
-        raise ValueError("k must be less than or equal to the number of documents in the corpus")
+    top_k = top_k if top_k <= retriever.scores['num_docs'] else retriever.scores['num_docs']
+    query = _process_corpus([query])[0]
     # Query the corpus and get top-k results
     docs, scores = retriever.retrieve(bm25s.tokenize(query), k=top_k)
     # Let's see what we got!
-    print(docs)
     docs = [doc['text'] if isinstance(doc, dict) else doc for doc in docs[0]]
     scores = scores[0]
-    for doc, score in zip(docs, scores):
-        print(f"Rank (score: {score}): {docs}")
+    return docs
 
 
 if __name__ == '__main__':

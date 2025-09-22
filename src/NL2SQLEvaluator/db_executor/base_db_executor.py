@@ -17,10 +17,8 @@ External API:
   - BaseSQLDBExecutor.db_id
   - BaseSQLDBExecutor.inspector
 """
-
 import logging
 import os
-import re
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional, Literal, Any
@@ -320,6 +318,7 @@ class BaseSQLDBExecutor(ABC):
             self,
             table_names: Optional[list[str]] = None,
             add_sample_rows_strategy: Optional[Literal["append", "inline"]] = None,
+            question: Optional[str] = None,
     ) -> str:
         """Build a string with DDL for specified tables and optional sample rows.
 
@@ -329,6 +328,7 @@ class BaseSQLDBExecutor(ABC):
                 * `"inline"`: Append example values as comments next to columns.
                 * `"append"`: Append INSERT statements with sampled rows.
                 * `None`: Do not include sample data.
+            question: Optional question string to guide sample data selection.
 
         Returns:
             str: Formatted DDL sections with optional sample data.
@@ -354,9 +354,22 @@ class BaseSQLDBExecutor(ABC):
         ]
 
         for table in meta_tables:
+            tbl_index = None
+            if question:
+                if table.name in self.index_db:
+                    tbl_index = self.index_db[table.name]
+
+            col2values_sim_quest = {} if question else None
             for k, v in table.columns.items():
                 if type(v.type) is NullType:
                     table._columns.remove(v)
+                if tbl_index and k in tbl_index:
+                    col2values_sim_quest[k] = retrieve_from_bm25_index(
+                        query=question,
+                        retriever=tbl_index[k],
+                        top_k=3
+                    )
+
             with self.engine.connect() as conn:
                 create_table = str(
                     CreateTable(table).compile(dialect=conn.dialect)
@@ -369,7 +382,9 @@ class BaseSQLDBExecutor(ABC):
                     execute_fn=self.execute_query,
                     dialect=conn.dialect,
                     strategy=add_sample_rows_strategy,
-                    num_rows=2
+                    num_rows=2,
+                    col2values_sim_quest=col2values_sim_quest,
+                    col2descr=self.tbl2col2descr.get(table.name, {}),
                 )
 
                 tables.append(table_info)
@@ -398,28 +413,7 @@ class BaseSQLDBExecutor(ABC):
             pass  # Ignore errors during cleanup
 
     @property
-    def index_db(self):
-        def _looks_numeric(val: Any) -> bool:
-            """Return True if val is numeric or a numeric-looking string (incl. negatives, decimals)."""
-            if isinstance(val, (int, float, Decimal)):
-                return True
-            if val is None:
-                return False
-            s = str(val).strip()
-            if s == "":
-                return False
-            try:
-                float(s)
-                return True
-            except ValueError:
-                return False
-
-        def _normalize(s: str) -> str:
-            """Lowercase, collapse whitespace, trim, and cap length to 40 chars."""
-            s = str(s).strip()
-            s = _ws_collapse.sub(" ", s).lower()
-            return s[:40]
-
+    def index_db(self) -> dict[str, dict[str, Any]]:
         """
         Build BM25 retrievers for categorical (string-ish) columns.
         Skips SQLite system tables, NULL/empty strings, and numeric-looking values.
@@ -428,7 +422,6 @@ class BaseSQLDBExecutor(ABC):
             return self._index_db
 
         self.logger.info("Building BM25 indexes for categorical columns")
-        _ws_collapse = re.compile(r"\s+")
 
         # Filter out SQLite internal tables
 
@@ -472,20 +465,12 @@ class BaseSQLDBExecutor(ABC):
                     values = [str(r[0])[:40].strip() for r in rows if
                               r and r[0] is not None and str(r[0]).strip() != ""]
 
-                # Filter out numeric-looking items and normalize
-                corpus = [_normalize(v) for v in values if v != "" and not _looks_numeric(v)]
-
-                # Deduplicate after normalization
-                corpus = list({v for v in corpus if v})
-
-                if not corpus:
-                    continue
-
                 # Ensure index path exists
                 index_path = os.path.join(self.path_for_bm25_index, table.name, col.name)
                 # Build the retriever
-                retriever = create_bm25_index(corpus, index_path)
-                col_indexes[col.name] = retriever
+                retriever = create_bm25_index(values, index_path)
+                if retriever:
+                    col_indexes[col.name] = retriever
 
             if col_indexes:
                 tables2indexes[table.name] = col_indexes

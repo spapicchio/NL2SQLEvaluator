@@ -197,7 +197,7 @@ class SqliteCacheDB(SqliteDBExecutor):
                                },
                                pool_pre_ping=True,
                                pool_recycle=1800)
-        initiated_object = cls(engine=engine, cache_db=None)
+        initiated_object = cls(engine=engine, cache_db=None, *args, **kwargs)
         initiated_object.create_cache_table()
         return initiated_object
 
@@ -311,9 +311,8 @@ class SqliteCacheDB(SqliteDBExecutor):
             return query
 
 
-
 if __name__ == "__main__":
     db = SqliteDBExecutor.from_uri(
-        relative_base_path='data/bird/train_databases/address/address.sqlite'
+        relative_base_path='data/bird_dev/dev_databases/california_schools/california_schools.sqlite',
     )
-    print(db.get_ddl_database(add_sample_rows_strategy='inline'))
+    print(db.get_ddl_database(add_sample_rows_strategy='inline', question='What is Augusta-Richmond County, GA-SC?'))
