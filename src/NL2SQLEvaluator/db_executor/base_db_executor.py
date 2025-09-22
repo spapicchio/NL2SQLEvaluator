@@ -22,10 +22,11 @@ import logging
 import os
 import re
 from abc import ABC, abstractmethod
-from decimal import Decimal
+from pathlib import Path
 from typing import Optional, Literal, Any
 
 import bm25s
+import pandas as pd
 import sqlalchemy as sa
 from langgraph.func import task
 from sqlalchemy import Engine, inspect, MetaData
@@ -103,14 +104,17 @@ class BaseSQLDBExecutor(ABC):
 
     def __init__(self,
                  engine: Engine,
+                 relative_base_path: Path | str,
                  cache_db: Optional["BaseSQLDBExecutor"] = None,
                  logger: Optional[logging.Logger] = None,
                  timeout: Optional[int | float] = 400,
                  save_in_cache=False,
-                 path_for_bm25_index: Optional[str] = None,
+                 path_for_bm25_index: str = '.nl2sql_evaluator_cache/bm25_index',
+                 path_tables_info_json: Optional[str] = None,
                  *args,
                  **kwargs):
         self.engine = engine
+        self.relative_base_path = relative_base_path if isinstance(relative_base_path, Path) else Path(relative_base_path)
         self.cache_db = cache_db
         self.logger = logger or get_logger(name=__name__, level="INFO")
         self.timeout = timeout
@@ -122,6 +126,10 @@ class BaseSQLDBExecutor(ABC):
         self.save_in_cache = save_in_cache
         self.path_for_bm25_index = os.path.join(path_for_bm25_index, self.db_id) if path_for_bm25_index else None
         self._index_db = None
+        self.path_tables_info_json = Path(path_tables_info_json) if path_tables_info_json else self.relative_base_path.parent.parent.parent / "tables.json"
+        if self.path_tables_info_json and not self.path_tables_info_json.suffix == ".json":
+            raise ValueError(f"path_tables_info_json should be a json file. Got {self.path_tables_info_json}")
+        self.tbl2col2descr = self._prepare_schema_filter_data()
 
     # -----------------
     # Properties
@@ -281,6 +289,29 @@ class BaseSQLDBExecutor(ABC):
         with self.engine.connect() as conn:
             self.metadata.reflect(bind=conn)
         return self.metadata
+
+    def _prepare_schema_filter_data(self) -> dict[str, dict[str, str]]:
+        if self.path_tables_info_json is None or not self.path_tables_info_json.exists():
+            return {}
+
+        db_info = pd.read_json(self.path_tables_info_json)
+        db_info = db_info[db_info.db_id == self.db_id]
+        if db_info.empty:
+            self.logger.warning(f"No table info found for db_id {self.db_id} in {self.path_tables_info_json}")
+            return {}
+
+        tbl2col2descr = {}
+        table_names_original = db_info["table_names_original"].values[0]
+        column_names_original = db_info["column_names_original"].values[0]
+        column_names = db_info["column_names"].values[0]
+        for outer_table_idx, table_name_original in enumerate(table_names_original):
+            tbl2col2descr[table_name_original] = {}
+            for (inner_table_idx, column_name_original), (_, column_comment) in zip(column_names_original,
+                                                                                    column_names):
+                if outer_table_idx == inner_table_idx and column_name_original != column_comment:
+                    tbl2col2descr[table_name_original][column_name_original] = column_comment
+
+        return tbl2col2descr
 
     # -----------------
     # Table Info Helpers
