@@ -236,8 +236,9 @@ def _utils_augment_fk_table_name(ddl: str, table: Table) -> str:
             return line_ddl_fk
         # Extract and normalize the referenced table name
         dest_raw = m.group(2)  # may be schema-qualified like main.schools
-        dest_simple = dest_raw.split('.')[-1].strip().strip('`"[]')
-        line_ddl_fk = f"\tCONSTRAINT fk_{src.lower().replace(" ", "_")}_{dest_simple.lower().replace(" ", "_")} {line_ddl_fk.strip()}"
+        dest_simple = dest_raw.split('.')[-1].strip().strip('`"[]').lower().replace(" ", "_")
+        src_norm = src.lower().replace(" ", "_")
+        line_ddl_fk = f"\tCONSTRAINT fk_{src_norm}_{dest_simple} {line_ddl_fk.strip()}"
         return line_ddl_fk
 
     return "\n".join([_internal(line) for line in ddl.splitlines()])

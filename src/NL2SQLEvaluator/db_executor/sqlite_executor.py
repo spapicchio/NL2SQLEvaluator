@@ -5,6 +5,7 @@ import os
 import pickle
 import sqlite3
 import time
+from functools import lru_cache
 from typing import Optional
 
 import sqlglot
@@ -50,7 +51,7 @@ class SqliteDBExecutor(BaseSQLDBExecutor):
                                },
                                pool_pre_ping=True,
                                pool_recycle=1800)
-        logger.warning(f"Created ENGINE for high concurrency read settings but NO WRITE.")
+        logger.debug(f"Created ENGINE for high concurrency read settings but NO WRITE.")
         return cls(engine=engine, cache_db=None, *args, **kwargs)
 
     def _install_pragmas_listener(self) -> None:
@@ -197,7 +198,7 @@ class SqliteCacheDB(SqliteDBExecutor):
                                },
                                pool_pre_ping=True,
                                pool_recycle=1800)
-        initiated_object = cls(engine=engine, cache_db=None, *args, **kwargs)
+        initiated_object = cls(engine=engine, *args, **kwargs)
         initiated_object.create_cache_table()
         return initiated_object
 
@@ -218,6 +219,7 @@ class SqliteCacheDB(SqliteDBExecutor):
                            """.strip()
         self.execute_query(create_table_sql)
 
+    @lru_cache(2000)
     def _is_id_already_present(self, hash_id: str) -> bool:
         stmt = "SELECT 1 FROM `cache_data` WHERE hash_key = :hash_id LIMIT 1"
         result_row = self.execute_query(query=stmt, params={"hash_id": hash_id})
@@ -267,6 +269,10 @@ class SqliteCacheDB(SqliteDBExecutor):
                 self.logger.debug('Skipping insert as already present in cache_db.')
                 continue
             to_insert.append({"hash_id": hash_id, "db_id": db_id, "query": parsed_query, "result": pickled_result})
+
+        if not to_insert:
+            self.logger.debug("Nothing to insert (all keys already present).")
+            return None
 
         stmt = "INSERT OR IGNORE INTO `cache_data` (hash_key, db_id, query, result) VALUES (:hash_id, :db_id, :query, :result)"
         try:

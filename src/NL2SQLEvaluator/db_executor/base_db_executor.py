@@ -17,6 +17,7 @@ External API:
   - BaseSQLDBExecutor.db_id
   - BaseSQLDBExecutor.inspector
 """
+import atexit
 import logging
 import os
 from abc import ABC, abstractmethod
@@ -112,7 +113,8 @@ class BaseSQLDBExecutor(ABC):
                  *args,
                  **kwargs):
         self.engine = engine
-        self.relative_base_path = relative_base_path if isinstance(relative_base_path, Path) else Path(relative_base_path)
+        self.relative_base_path = relative_base_path if isinstance(relative_base_path, Path) else Path(
+            relative_base_path)
         self.cache_db = cache_db
         self.logger = logger or get_logger(name=__name__, level="INFO")
         self.timeout = timeout
@@ -124,10 +126,16 @@ class BaseSQLDBExecutor(ABC):
         self.save_in_cache = save_in_cache
         self.path_for_bm25_index = os.path.join(path_for_bm25_index, self.db_id) if path_for_bm25_index else None
         self._index_db = None
-        self.path_tables_info_json = Path(path_tables_info_json) if path_tables_info_json else self.relative_base_path.parent.parent.parent / "tables.json"
+        self.path_tables_info_json = Path(
+            path_tables_info_json) if path_tables_info_json else self.relative_base_path.parent.parent.parent / "tables.json"
         if self.path_tables_info_json and not self.path_tables_info_json.suffix == ".json":
             raise ValueError(f"path_tables_info_json should be a json file. Got {self.path_tables_info_json}")
         self.tbl2col2descr = self._prepare_schema_filter_data()
+
+        # during Python interpreter shutdown, objects can be torn down in arbitrary order. If a callback later tried to access self.engine, self (or its attributes) might already be partially destroyed.
+        eng = self.engine  # capture by value
+        # Registers a function to run right before the interpreter exits.
+        atexit.register(lambda e=eng: e.dispose() if e is not None else None)
 
     # -----------------
     # Properties
@@ -393,25 +401,6 @@ class BaseSQLDBExecutor(ABC):
         final_str = "\n\n".join(tables)
         return final_str
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.dispose()
-
-    def dispose(self):
-        """Dispose of the engine and clean up connections."""
-        if hasattr(self, 'engine') and self.engine:
-            self.engine.dispose()
-            self.logger.debug("Engine disposed")
-
-    def __del__(self):
-        """Cleanup when object is garbage collected."""
-        try:
-            self.dispose()
-        except Exception:
-            pass  # Ignore errors during cleanup
-
     @property
     def index_db(self) -> dict[str, dict[str, Any]]:
         """
@@ -495,3 +484,12 @@ class BaseSQLDBExecutor(ABC):
         docs = retriever.retrieve(bm25s.tokenize(query), k=top_k)
         docs = [doc['text'] if isinstance(doc, dict) else doc for doc in docs[0]]
         return docs
+
+    def dispose(self):
+        """Dispose of the engine and clean up connections."""
+        try:
+            if getattr(self, "engine", None) is not None:
+                self.engine.dispose()
+        except Exception:
+            # swallow on shutdown
+            pass

@@ -18,7 +18,7 @@ from NL2SQLEvaluator.db_executor.sqlite_executor import SqliteDBExecutor
 # ---------------------------------------------------------------------------
 @pytest.fixture(scope="session")
 def sample_db_path() -> str:
-    return 'data/bird/bird_train/train_databases/airline/airline.sqlite'
+    return 'data/bird/train_databases/airline/airline.sqlite'
 
 
 @pytest.fixture(scope="session")
@@ -311,6 +311,6 @@ class TestSqliteDBExecutor:
             path_for_bm25_index='bm25_test_index'
         )
 
-        retriever = executor.get_index_db()
+        retriever = executor.index_db
         assert retriever is not None
 
