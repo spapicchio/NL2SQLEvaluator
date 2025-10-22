@@ -11,6 +11,7 @@ class AvailableDialect(Enum):
 class AvailableMetrics(Enum):
     """Enum for different metrics used in evaluation."""
     EXECUTION_ACCURACY = "execution_accuracy"
+    EXECUTION_ACCURACY_SENSITIVITY = "execution_accuracy_sensitivity"
     F1_SCORE = "f1_score"
     CELL_PRECISION = "cell_precision"
     CELL_RECALL = "cell_recall"
@@ -21,6 +22,9 @@ class AvailableMetrics(Enum):
     # Optional: accept case-insensitive and aliases like "val" / "validation"
     _ALIASES = {
         'execution_accuracy': 'EXECUTION_ACCURACY',
+        'execution_accuracy_sensitivity': 'EXECUTION_ACCURACY_SENSITIVITY',
+        'ea': 'EXECUTION_ACCURACY',
+        'ea_sensitivity': 'EXECUTION_ACCURACY_SENSITIVITY',
         'f1_score': 'F1_SCORE',
         'cell_precision': 'CELL_PRECISION',
         'cell_recall': 'CELL_RECALL',

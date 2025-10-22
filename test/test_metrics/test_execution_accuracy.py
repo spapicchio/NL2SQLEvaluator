@@ -29,32 +29,33 @@ class TestExecutionAccuracy:
         orchestrator_input["predicted_queries"] = [[('b', 'a'), ('d', 'c')]]
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
-        assert result[0]['execution_accuracy'] == 1.0
+        # unfortunately, in standard execution accuracy, projection order does not matter :(
+        assert result[0]['execution_accuracy'] == 0.0
 
     def test_equal_but_different_tuple_order(self, orchestrator_input):
         orchestrator_input["target_queries"] = [[('a', 'b'), ('c', 'd')]]
-        orchestrator_input["predicted_queries"] = [[('d', 'c'), ('b', 'a')]]
+        orchestrator_input["predicted_queries"] = [[('c', 'd'), ('a', 'b')]]
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
         assert result[0]['execution_accuracy'] == 1.0
 
     def test_null_values(self, orchestrator_input):
         orchestrator_input["target_queries"] = [[('a', None), ('c', 'd')]]
-        orchestrator_input["predicted_queries"] = [[('d', 'c'), (None, 'a')]]
+        orchestrator_input["predicted_queries"] = [[('c', 'd'), ('a', None)]]
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
         assert result[0]['execution_accuracy'] == 1.0
 
     def test_null_math_none(self, orchestrator_input):
         orchestrator_input["target_queries"] = [[('a', math.nan), ('c', 'd')]]
-        orchestrator_input["predicted_queries"] = [[('d', 'c'), (math.nan, 'a')]]
+        orchestrator_input["predicted_queries"] = [[('c', 'd'), ('a', math.nan)]]
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
         assert result[0]['execution_accuracy'] == 1.0
 
     def test_mixed_types(self, orchestrator_input):
         orchestrator_input["target_queries"] = [[('a', 1), ('c', 'd')]]
-        orchestrator_input["predicted_queries"] = [[('d', 'c'), (1.0000000001, 'a')]]
+        orchestrator_input["predicted_queries"] = [[('c', 'd'), ('a', 1.0000000001)]]
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
         assert result[0]['execution_accuracy'] == 1.0
@@ -93,3 +94,11 @@ class TestExecutionAccuracy:
         orchestrator_input = OrchestratorInput(**orchestrator_input)
         result = evaluator_orchestrator.invoke(orchestrator_input)
         assert result[0]['execution_accuracy'] == 0.0
+
+    def test_bird_ex_no_distinct(self, orchestrator_input):
+        orchestrator_input["target_queries"] = [[('a', 'b'), ('a', 'b')]]
+        orchestrator_input["predicted_queries"] = [[('a', 'b')]]
+        orchestrator_input = OrchestratorInput(**orchestrator_input)
+        result = evaluator_orchestrator.invoke(orchestrator_input)
+        # unfortunately, in standard execution accuracy, duplicates do not matter :(
+        assert result[0]['execution_accuracy'] == 1.0

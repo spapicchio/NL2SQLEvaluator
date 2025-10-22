@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict
 
 from NL2SQLEvaluator.db_executor import BaseSQLDBExecutor
 from NL2SQLEvaluator.logger import get_logger
-from NL2SQLEvaluator.metric_executor.execution_accuracy import worker_execution_accuracy
+from NL2SQLEvaluator.metric_executor.execution_accuracy import worker_ex
+from NL2SQLEvaluator.metric_executor.execution_accuracy_mult_sensitive import worker_ex_sensitive
 from NL2SQLEvaluator.metric_executor.qatch_metrics import (
     worker_cell_precision,
     worker_cell_recall,
@@ -22,7 +23,8 @@ logger = get_logger(__name__, level="INFO")
 
 # Map enum -> callable (sync or task-like)
 metric_functions = {
-    AvailableMetrics.EXECUTION_ACCURACY: worker_execution_accuracy,
+    AvailableMetrics.EXECUTION_ACCURACY: worker_ex,
+    AvailableMetrics.EXECUTION_ACCURACY_SENSITIVITY: worker_ex_sensitive,
     AvailableMetrics.F1_SCORE: worker_f1_score,
     AvailableMetrics.CELL_PRECISION: worker_cell_precision,
     AvailableMetrics.CELL_RECALL: worker_cell_recall,
@@ -57,6 +59,7 @@ class OrchestratorInput(BaseModel):
             else:
                 raise ValueError(f"Metric must be str or AvailableMetrics, got {type(m)}")
         return out
+
 
 @entrypoint()
 def evaluator_orchestrator(params: OrchestratorInput) -> list[dict[str, float]]:
