@@ -3,7 +3,7 @@ import sqlite3
 
 from func_timeout import func_timeout, FunctionTimedOut
 
-from NL2SQLEvaluator.db_readers_nodes.db_reader_protocol import OutputTable
+from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable
 from NL2SQLEvaluator.node_registry import register_node
 
 
