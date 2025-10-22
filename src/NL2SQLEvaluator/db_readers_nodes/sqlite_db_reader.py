@@ -3,11 +3,11 @@ import sqlite3
 
 from func_timeout import func_timeout, FunctionTimedOut
 
-from NL2SQLEvaluator.db_readers_nodes import register_db_reader
 from NL2SQLEvaluator.db_readers_nodes.db_reader_protocol import OutputTable
+from NL2SQLEvaluator.node_registry import register_node
 
 
-@register_db_reader()
+@register_node()
 class SQLiteDBReader:
     def execute_queries(self, db_file: str, queries: list[str], *args, **kwargs) -> list[OutputTable]:
         timeout_s = kwargs.get("timeout", 10)
