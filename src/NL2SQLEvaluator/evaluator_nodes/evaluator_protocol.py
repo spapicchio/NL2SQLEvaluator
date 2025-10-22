@@ -1,6 +1,6 @@
 from typing import Protocol, TypeAlias
 
-from NL2SQLEvaluator.db_readers_nodes.db_reader_protocol import OutputTable
+from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable
 
 TaskPredictions: TypeAlias = list[OutputTable]
 TaskTargets: TypeAlias = list[OutputTable]

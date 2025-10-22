@@ -1,4 +1,4 @@
-from NL2SQLEvaluator.db_readers_nodes.db_reader_protocol import OutputTable
+from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import TaskPredictions, TaskTargets
 from NL2SQLEvaluator.evaluator_nodes.utils import get_majority_voting_values, sort_with_different_types
 from NL2SQLEvaluator.node_registry import register_node
