@@ -1,6 +1,6 @@
 import pandas as pd
 
-from NL2SQLEvaluator.dataset_reader_nodes.data_readers import DataInput
+from NL2SQLEvaluator.dataset_reader_nodes.data_readers import DataInput, enforce_input_type
 from NL2SQLEvaluator.node_registry import register_node
 
 
@@ -18,5 +18,6 @@ class ReadBird:
 
         df['db_file'] = df['db_id'].map(lambda row: f"{base_db_path}/{row}/{row}.sqlite")
         df['target_query'] = df['SQL']
-
-        return df.to_dict(orient='records')
+        values = df.to_dict(orient='records')
+        enforce_input_type(values)
+        return values
