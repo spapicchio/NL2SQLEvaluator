@@ -28,6 +28,7 @@ class VLLMPredictor:
                                                      reasoning_effort=reasoning_effort)
         output = llm.generate(chat_prompts, sampling_params)
         responses = [o.outputs[0].text for o in output]
+        responses = [[o] if not isinstance(o, list) else o for o in responses]
         return responses
 
     def _load_model(self, model_name, tp, dp, max_model_len):

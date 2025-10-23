@@ -2,11 +2,10 @@ import time
 
 import requests
 from litellm.types.utils import ModelResponse
+from vllm import SamplingParams
 
 from NL2SQLEvaluator.dataset_reader_nodes.data_readers import ChatMessageHF
 from NL2SQLEvaluator.logger import get_logger
-from vllm import SamplingParams
-
 from NL2SQLEvaluator.node_registry import register_node
 
 logger = get_logger(__name__)
@@ -84,7 +83,7 @@ class LiteLLMPredictor:
 
     def parse_model_output(
             self, model_answer: list[ModelResponse]
-    ) -> list[list[str] | str]:
+    ) -> list[list[str]]:
 
         parsed_response: list[list[str]] = []
         for out in model_answer:
@@ -98,7 +97,7 @@ class LiteLLMPredictor:
             parsed_response.append(choices_response)
 
         parsed_response = [
-            response if len(response) > 1 else response[0]
+            response
             for response in parsed_response
         ]
 
