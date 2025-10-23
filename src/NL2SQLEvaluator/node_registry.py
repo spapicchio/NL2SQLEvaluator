@@ -26,7 +26,7 @@ def register_node(
     return decorator
 
 
-def get_node(package_name, fun_name: str) -> Any:
+def get_node_from_registry(package_name, fun_name: str) -> Any:
     if package_name not in _registry:
         raise KeyError(f"Package '{package_name}' not found in registry.  Available packages: {list(_registry.keys())}")
     bucket = _registry[package_name]
