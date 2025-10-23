@@ -1,9 +1,10 @@
 import multiprocessing as mp
 import sqlite3
 
-from NL2SQLEvaluator.db_executors_nodes import OutputTable, ExecutorError
-from NL2SQLEvaluator.node_registry import register_node
 from func_timeout import func_timeout, FunctionTimedOut
+
+from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable, ExecutorError
+from NL2SQLEvaluator.node_registry import register_node
 
 
 @register_node()

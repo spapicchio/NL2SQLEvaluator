@@ -6,7 +6,7 @@ from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable,
 from NL2SQLEvaluator.db_executors_nodes.sqlite_db_executor import SQLiteDBReader
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
-from NL2SQLEvaluator.sql_cache_node.sql_cache_protocol import NotFoundInCacheError
+from NL2SQLEvaluator.sql_cache_nodes.sql_cache_protocol import NotFoundInCacheError
 
 logger = get_logger(__name__)
 
