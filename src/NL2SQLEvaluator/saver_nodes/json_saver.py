@@ -5,10 +5,12 @@ from typing import Any
 
 import pandas as pd
 from NL2SQLEvaluator.logger import get_logger
+from NL2SQLEvaluator.node_registry import register_node
 
 logger = get_logger(__name__)
 
 
+@register_node()
 class JSONSaver:
     @staticmethod
     def save(folder: Path, df: pd.DataFrame, configs: tuple[Any], *args, **kwargs):
