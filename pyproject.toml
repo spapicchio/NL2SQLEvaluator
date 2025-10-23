@@ -27,6 +27,8 @@ dependencies = [
     "flashinfer-cubin",
     "flash-attn==2.8.3",
     "litellm>=1.77.7",
+    "typer>=0.20.0",
+    "typer-config[all]>=1.4.2",
 ]
 
 
@@ -36,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-nl2sql_eval = "NL2SQLEvaluator.cli:cli"
+nl2sql_eval = "NL2SQLEvaluator.cli:app"
 
 [build-system]
 requires = ["hatchling"]

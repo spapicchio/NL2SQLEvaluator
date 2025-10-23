@@ -1,8 +1,8 @@
+from typing import Any
+
 from NL2SQLEvaluator.dataset_reader_nodes.data_readers import ChatMessageHF
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
-from transformers import AutoTokenizer
-from vllm import SamplingParams, LLM
 
 logger = get_logger(__name__)
 
@@ -12,7 +12,7 @@ class VLLMPredictor:
     def infer(self,
               model_name: str,
               multiple_tasks_messages: list[ChatMessageHF],
-              sampling_params: SamplingParams,
+              sampling_params: Any,
               *args,
               **kwargs) -> list[list[str]]:
         tp = kwargs.get('tensor_parallel_size', 1)
@@ -32,6 +32,7 @@ class VLLMPredictor:
 
     def _load_model(self, model_name, tp, dp, max_model_len):
         # https://docs.vllm.ai/en/latest/configuration/optimization.html#performance-tuning-with-chunked-prefill
+        from vllm import LLM
         llm = LLM(
             model=model_name,
             dtype="bfloat16",
@@ -48,5 +49,6 @@ class VLLMPredictor:
         return llm
 
     def _load_tokenizer(self, model_name):
+        from transformers import AutoTokenizer
         tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
         return tokenizer

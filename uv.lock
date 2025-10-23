@@ -1305,6 +1305,8 @@ dependencies = [
     { name = "sqlglot" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "typer" },
+    { name = "typer-config", extra = ["all"] },
     { name = "vllm" },
     { name = "wandb" },
 ]
@@ -1336,6 +1338,8 @@ requires-dist = [
     { name = "sqlglot", specifier = ">=27.11.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "transformers", specifier = ">=4.56.0" },
+    { name = "typer", specifier = ">=0.20.0" },
+    { name = "typer-config", extras = ["all"], specifier = ">=1.4.2" },
     { name = "vllm", specifier = "==0.10.2" },
     { name = "wandb", specifier = ">=0.21.3" },
 ]
@@ -2505,6 +2509,15 @@ wheels = [
 ]
 
 [[package]]
+name = "toml"
+version = "0.10.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/be/ba/1f744cdc819428fc6b5084ec34d9b30660f6f9daaf70eead706e3203ec3c/toml-0.10.2.tar.gz", hash = "sha256:b3bda1d108d5dd99f4a20d24d9c348e91c4db7ab1b749200bded2f839ccbe68f", size = 22253, upload-time = "2020-11-01T01:40:22.204Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/6f/7120676b6d73228c96e17f1f794d8ab046fc910d781c8d151120c3f1569e/toml-0.10.2-py2.py3-none-any.whl", hash = "sha256:806143ae5bfb6a3c6e736a764057db0e6a0e05e338b5630894a5f779cabb4f9b", size = 16588, upload-time = "2020-11-01T01:40:20.672Z" },
+]
+
+[[package]]
 name = "torch"
 version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2626,6 +2639,25 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8f/28/7c85c8032b91dbe79725b6f17d2fffc595dff06a35c7a30a37bef73a1ab4/typer-0.20.0.tar.gz", hash = "sha256:1aaf6494031793e4876fb0bacfa6a912b551cf43c1e63c800df8b1a866720c37", size = 106492, upload-time = "2025-10-20T17:03:49.445Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/78/64/7713ffe4b5983314e9d436a90d5bd4f63b6054e2aca783a3cfc44cb95bbf/typer-0.20.0-py3-none-any.whl", hash = "sha256:5b463df6793ec1dca6213a3cf4c0f03bc6e322ac5e16e13ddd622a889489784a", size = 47028, upload-time = "2025-10-20T17:03:47.617Z" },
+]
+
+[[package]]
+name = "typer-config"
+version = "1.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/2e/af/78f802bc49eaa5855082cca10e9c9d7d03469c957c149aa159561dc3d744/typer_config-1.4.2.tar.gz", hash = "sha256:69dffc0e06095b57754bfe9fb3e4caf28ab9c2c430dade6433b0ca128510f600", size = 10919, upload-time = "2024-11-08T01:59:06.635Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/bd/2e9d407d7ed3f33a40d8211a481b76a0507ba4f117da9dec116c0de9871e/typer_config-1.4.2-py3-none-any.whl", hash = "sha256:b3e1f59bacc8276e5b830f35c9ca403cd85f14173169c23c3756fa816357a34f", size = 11698, upload-time = "2024-11-08T01:59:05.787Z" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "toml" },
 ]
 
 [[package]]

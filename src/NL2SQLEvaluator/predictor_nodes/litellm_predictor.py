@@ -1,6 +1,13 @@
+import time
+
+import requests
+from litellm.types.utils import ModelResponse
+
 from NL2SQLEvaluator.dataset_reader_nodes.data_readers import ChatMessageHF
 from NL2SQLEvaluator.logger import get_logger
 from vllm import SamplingParams
+
+from NL2SQLEvaluator.node_registry import register_node
 
 logger = get_logger(__name__)
 
@@ -57,7 +64,7 @@ class LiteLLMPredictor:
         # stream=True makes each item in the returned list a streaming iterator
         model_answer = litellm.batch_completion(
             model=f"{litellm_provider}/{model_name}",
-            messages=messages,
+            messages=multiple_tasks_messages,
             temperature=sampling_params.temperature,
             max_tokens=sampling_params.max_tokens if 'gpt' not in model_name.lower() else None,
             top_p=sampling_params.top_p,
@@ -73,7 +80,7 @@ class LiteLLMPredictor:
         )
 
         parsed_responses = self.parse_model_output(model_answer)
-        return parsed_responses if not is_single else parsed_responses[0]
+        return parsed_responses
 
     def parse_model_output(
             self, model_answer: list[ModelResponse]
