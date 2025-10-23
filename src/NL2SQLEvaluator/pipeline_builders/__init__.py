@@ -1,1 +1,0 @@
-from NL2SQLEvaluator.pipeline_builders.pipeline_eval_only import PipelineEvalOnly

@@ -1,49 +1,86 @@
 import multiprocessing as mp
+import os
 import sqlite3
 
 from func_timeout import func_timeout, FunctionTimedOut
 
 from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable, ExecutorError
 from NL2SQLEvaluator.node_registry import register_node
+from NL2SQLEvaluator.sql_cache_nodes.sql_cache_protocol import SQLCacheProtocol, NotFoundInCacheError
 
 
 @register_node()
 class SQLiteDBReader:
     @staticmethod
-    def execute_queries(db_file: str, queries: list[str], params: list[dict] | None = None, *args, **kwargs) -> list[
-        OutputTable | ExecutorError]:
+    def execute_queries(
+            db_files: list[str],
+            queries: list[list[str]],
+            params: list[dict] | None = None,
+            cache_db: SQLCacheProtocol | None = None,
+            cache_db_file: str | None = None,
+            *args, **kwargs
+    ) -> list[list[OutputTable | ExecutorError]]:
         timeout_s = kwargs.get("timeout", 10)
-        raw_results: list[OutputTable] = []
-        if len(queries) == 0:
-            return raw_results
 
-        elif len(queries) == 1:
-            raw_results = [SQLiteDBReader._execute_single_query(db_file, queries[0], timeout_s, params=params[0])]
+        if not queries:
+            return [[]]
 
+        # Normalize per-job params length & default to None
+        if params is None:
+            params = [None] * len(queries)
+        elif len(params) != len(queries):
+            raise ValueError("Length of params must match length of queries (or be None).")
+
+        tasks = _build_task_for_mp(db_files, queries, timeout_s, params, cache_db, cache_db_file)
+        total_tasks = len(tasks)
+        default_procs = min(max(1, mp.cpu_count()), max(1, total_tasks))
+        num_cpus: int = kwargs.get("num_cpus", default_procs)
+
+        # Run workers
+        with mp.Pool(processes=num_cpus) as pool:
+            flat_results: list[tuple[int, int, OutputTable | ExecutorError]] = pool.starmap(
+                _execute_single_query,
+                tasks
+            )
+        # Reassemble into rectangular [jobs][idx] result
+        results: list[list[OutputTable | ExecutorError]] = [[None] * len(job) for job in queries]  # type: ignore
+        for job_id, idx, value in flat_results:
+            results[job_id][idx] = value
+
+        return results
+
+
+def _build_task_for_mp(db_files: list[str], queries: list[list], timeout_s, params, cache_db, cache_db_file):
+    tasks = []
+    for job_id, (query, param, db_file) in enumerate(zip(queries, params, db_files)):
+        for idx, query_i in enumerate(query):
+            tasks.append((job_id, idx, db_file, query_i, timeout_s, False, param, cache_db, cache_db_file))
+    return tasks
+
+
+def _execute_single_query(
+        job_id: int,
+        idx: int,
+        db_file: str,
+        query: str,
+        timeout_s: float,
+        allow_write: bool = False,
+        params: list[dict] | dict | None = None,
+        cache_db: SQLCacheProtocol | None = None,
+        cache_db_file: str | None = None,
+) -> tuple[int, int, OutputTable | ExecutorError]:
+    """
+    Executes a single statement with timeout, in its own connection.
+    - If allow_write is False, pragma query_only + rollback after SELECT.
+    - If allow_write is True, commit on success and return rowcount.
+    """
+
+    def _internal():
+        db_id = os.path.splitext(os.path.basename(db_file))[0]
+        cached = cache_db.get_from_cache(cache_db_file, [db_id], [query])[0]
+        if not isinstance(cached, NotFoundInCacheError):
+            result = cached
         else:
-            num_cpus = kwargs.get("num_cpus", min(max(1, mp.cpu_count()), max(1, len(queries))))
-            with mp.Pool(processes=num_cpus) as pool:
-                raw_results: list[OutputTable | ExecutorError] = pool.starmap(
-                    SQLiteDBReader._execute_single_query,
-                    [(query, timeout_s, False, param) for query, param in zip(queries, params)],
-                )
-
-        return raw_results
-
-    @staticmethod
-    def _execute_single_query(db_file,
-                              query: str,
-                              timeout_s: float,
-                              allow_write: bool = False,
-                              params: list[dict] | dict | None = None) -> OutputTable | ExecutorError:
-        """
-         Executes the SQL with a timeout. If allow_write is False the connection is set to query-only
-         when supported and changes are always rolled back. If allow_write is True the statement may
-         modify the DB and changes are committed on success. Returns result rows for SELECT-like
-         statements or an integer rowcount for write statements. Returns None on error/timeout.
-         """
-
-        def _internal():
             conn = None
             try:
                 conn = sqlite3.connect(db_file)
@@ -54,6 +91,7 @@ class SQLiteDBReader:
                     conn.execute("PRAGMA query_only=ON;")
                 cur = conn.cursor()
                 conn.execute("BEGIN TRANSACTION;")
+
                 if params is not None and isinstance(params, list):
                     conn.executemany(query, params)
                 else:
@@ -79,10 +117,10 @@ class SQLiteDBReader:
             finally:
                 if conn is not None:
                     conn.close()
-            return result
+        return result
 
-        try:
-            rows = func_timeout(timeout_s, _internal)
-        except FunctionTimedOut:
-            rows = ExecutorError(f'Query Timeout with {timeout_s} seconds')
-        return rows
+    try:
+        rows = func_timeout(timeout_s, _internal)
+    except FunctionTimedOut:
+        rows = ExecutorError(f'Query Timeout with {timeout_s} seconds')
+    return job_id, idx, rows
