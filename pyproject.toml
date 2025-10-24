@@ -38,7 +38,7 @@ dev = [
 ]
 
 [project.scripts]
-nl2sql_eval = "NL2SQLEvaluator.cli:app"
+nl2sql_eval = "NL2SQLEvaluator.cli:main"
 
 [build-system]
 requires = ["hatchling"]
