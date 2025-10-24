@@ -1,6 +1,6 @@
 from typing import Any
 
-from NL2SQLEvaluator.dataset_reader_nodes.data_readers import ChatMessageHF
+from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
 

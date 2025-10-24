@@ -1,8 +1,8 @@
 from collections import Counter
 from enum import Enum
 
-from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable
-from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import TaskPredictions, TaskTargets
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import OutputTable
+from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import SingleTaskPred, SingleTaskTar
 from NL2SQLEvaluator.evaluator_nodes.utils import sort_with_different_types, get_majority_voting_values
 from NL2SQLEvaluator.node_registry import register_node
 
@@ -43,8 +43,8 @@ class QatchMetric(Enum):
 class QATCHEvaluator:
     def execute_metric(
             self,
-            multiple_tasks_preds: list[TaskPredictions],
-            multiple_tasks_tar: list[TaskTargets],
+            multiple_tasks_preds: list[SingleTaskPred],
+            multiple_tasks_tar: list[SingleTaskTar],
             metric: QatchMetric,
             *args,
             **kwargs

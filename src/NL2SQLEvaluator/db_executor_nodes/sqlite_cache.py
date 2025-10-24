@@ -2,11 +2,11 @@ import hashlib
 import pickle
 
 import sqlglot
-from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable, ExecutorError
-from NL2SQLEvaluator.db_executors_nodes.sqlite_db_executor import SQLiteDBReader
+
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, OutputTable, NotFoundInCacheError
+from NL2SQLEvaluator.db_executor_nodes.sqlite_db_executor import SQLiteDBExecutor
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
-from NL2SQLEvaluator.sql_cache_nodes.sql_cache_protocol import NotFoundInCacheError
 
 logger = get_logger(__name__)
 
@@ -36,7 +36,7 @@ def create_cache_table(db_file) -> None:
                            `result`   BLOB NOT NULL
                        ); \
                        """.strip()
-    SQLiteDBReader._execute_single_query(db_file, create_table_sql, timeout_s=300, allow_write=True)
+    SQLiteDBExecutor._execute_single_query(db_file, create_table_sql, timeout_s=300, allow_write=True)
 
 
 def compress_data(data) -> bytes:
@@ -72,10 +72,10 @@ class SqliteCache:
             for db_id, query, executed_query in zip(db_ids, queries, executed_queries)
         ]
 
-        result = SQLiteDBReader._execute_single_query(db_file, insert_sql,
-                                                      timeout_s=300,
-                                                      allow_write=True,
-                                                      params=params)
+        result = SQLiteDBExecutor._execute_single_query(db_file, insert_sql,
+                                                        timeout_s=300,
+                                                        allow_write=True,
+                                                        params=params)
         if isinstance(result, ExecutorError):
             logger.error(f'Impossible to set cache in the database. error: {result}')
 
@@ -90,7 +90,7 @@ class SqliteCache:
         hash_ids = [{'hash_key': hash_db_id_sql(db_id, parse_sql_query(query))}
                     for db_id, query in zip(db_ids, queries)]
 
-        results = SQLiteDBReader.execute_queries(
+        results = SQLiteDBExecutor.execute_queries(
             db_file,
             queries=[select_sql] * len(hash_ids),
             params=hash_ids,

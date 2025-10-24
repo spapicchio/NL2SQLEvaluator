@@ -1,1 +1,0 @@
-from NL2SQLEvaluator.db_executors_nodes.sqlite_db_executor import SQLiteDBReader

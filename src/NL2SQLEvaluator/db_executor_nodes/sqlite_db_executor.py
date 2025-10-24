@@ -4,13 +4,13 @@ import sqlite3
 
 from func_timeout import func_timeout, FunctionTimedOut
 
-from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable, ExecutorError
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, OutputTable, NotFoundInCacheError, \
+    SQLCacheProtocol
 from NL2SQLEvaluator.node_registry import register_node
-from NL2SQLEvaluator.sql_cache_nodes.sql_cache_protocol import SQLCacheProtocol, NotFoundInCacheError
 
 
 @register_node()
-class SQLiteDBReader:
+class SQLiteDBExecutor:
     @staticmethod
     def execute_queries(
             db_files: list[str],

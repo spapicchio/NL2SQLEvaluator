@@ -1,5 +1,5 @@
-from NL2SQLEvaluator.db_executors_nodes.db_executor_protocol import OutputTable
-from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import TaskPredictions, TaskTargets
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import OutputTable
+from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import SingleTaskPred, SingleTaskTar
 from NL2SQLEvaluator.evaluator_nodes.utils import get_majority_voting_values, sort_with_different_types
 from NL2SQLEvaluator.node_registry import register_node
 
@@ -8,8 +8,8 @@ from NL2SQLEvaluator.node_registry import register_node
 class EXEvaluator:
     def execute_metric(
             self,
-            multiple_tasks_preds: list[TaskPredictions],
-            multiple_tasks_tar: list[TaskTargets],
+            multiple_tasks_preds: list[SingleTaskPred],
+            multiple_tasks_tar: list[SingleTaskTar],
             *args,
             **kwargs
     ) -> list[float]:
@@ -17,7 +17,7 @@ class EXEvaluator:
         results = [self._ex(pred, tar) for pred, tar in zip(multiple_tasks_preds, multiple_tasks_tar)]
         return results
 
-    def _ex(self, task_pred: TaskPredictions, task_tar: TaskTargets) -> float:
+    def _ex(self, task_pred: SingleTaskPred, task_tar: SingleTaskTar) -> float:
 
         target: OutputTable = [tuple(sort_with_different_types(row)) for row in task_tar[0]]
         pred = get_majority_voting_values(task_pred, count_cardinality_in_row=True)

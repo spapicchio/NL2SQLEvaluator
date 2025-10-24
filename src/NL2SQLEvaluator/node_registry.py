@@ -47,8 +47,8 @@ def _package_level_name(node: Any, *, base_package: str | None = None) -> str:
     (or the immediate parent package if base_package is None).
 
     Examples:
-    - node.__module__ = 'NL2SQLEvaluator.db_executors_nodes.db_executor_protocol'
-      base_package='NL2SQLEvaluator'  -> 'db_executors_nodes'
+    - node.__module__ = 'NL2SQLEvaluator.db_executor_nodes.db_executor_protocol'
+      base_package='NL2SQLEvaluator'  -> 'db_executor_nodes'
     - node.__module__ = 'pkg.sub.mod' base_package=None -> 'sub'
     """
     mod = getattr(node, "__module__", "") or ""
@@ -60,7 +60,7 @@ def _package_level_name(node: Any, *, base_package: str | None = None) -> str:
         prefix = base_package + "."
         if parent_pkg.startswith(prefix):
             # Keep only the part after 'base_package.'
-            rest = parent_pkg[len(prefix):]  # e.g., 'db_executors_nodes'
+            rest = parent_pkg[len(prefix):]  # e.g., 'db_executor_nodes'
             return rest.split(".", 1)[0] or base_package
         # If it doesn't start with base, just fall back to last segment
     # No base_package: return immediate parent segment
