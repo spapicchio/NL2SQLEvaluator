@@ -6,7 +6,7 @@ def sort_with_different_types(arr: tuple) -> tuple:
 
 
 def sort_key(x):
-    raw = x.raw
+    raw = x
     if raw is None:
         return 0, ''
     elif isinstance(raw, (int, float)):

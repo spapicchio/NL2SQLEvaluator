@@ -18,7 +18,6 @@ class ReadBird:
 
         df['db_file'] = df['db_id'].map(lambda row: f"{base_db_path}/{row}/{row}.sqlite")
         df['target_query'] = df['SQL']
-        df['input_seq'] = df.input_seq.map(lambda x: {})
         values = df.to_dict(orient='records')
         enforce_input_type(values)
         return values
