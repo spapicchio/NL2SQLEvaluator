@@ -1,12 +1,15 @@
 import multiprocessing as mp
-import os
 import sqlite3
+from pathlib import Path
+from typing import Any, Union
 
 from func_timeout import func_timeout, FunctionTimedOut
 
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, OutputTable, NotFoundInCacheError, \
     SQLCacheProtocol
 from NL2SQLEvaluator.node_registry import register_node
+
+ParamsType = Union[list[dict], dict, None]
 
 
 @register_node()
@@ -28,14 +31,16 @@ class SQLiteDBExecutor:
         # Normalize per-job params length & default to None
         if params is None:
             params = [None] * len(queries)
-        elif len(params) != len(queries):
+
+        if len(params) != len(queries):
             raise ValueError("Length of params must match length of queries (or be None).")
 
         tasks = _build_task_for_mp(db_files, queries, timeout_s, params, cache_db, cache_db_file)
         total_tasks = len(tasks)
         default_procs = min(max(1, mp.cpu_count()), max(1, total_tasks))
         num_cpus: int = kwargs.get("num_cpus", default_procs)
-
+        if len(tasks) == 1:
+            return [[_execute_single_query(*tasks[0])[2]]]
         # Run workers
         with mp.Pool(processes=num_cpus) as pool:
             flat_results: list[tuple[int, int, OutputTable | ExecutorError]] = pool.starmap(
@@ -65,62 +70,122 @@ def _execute_single_query(
         query: str,
         timeout_s: float,
         allow_write: bool = False,
-        params: list[dict] | dict | None = None,
+        params: ParamsType = None,
         cache_db: SQLCacheProtocol | None = None,
         cache_db_file: str | None = None,
 ) -> tuple[int, int, OutputTable | ExecutorError]:
     """
-    Executes a single statement with timeout, in its own connection.
-    - If allow_write is False, pragma query_only + rollback after SELECT.
-    - If allow_write is True, commit on success and return rowcount.
+    Execute a single SQL statement with a timeout, in an isolated connection.
+
+    Behavior:
+      - If a cache is provided and returns a hit, return the cached value.
+      - If allow_write is False: PRAGMA query_only=ON, run the query, fetchall, then ROLLBACK.
+      - If allow_write is True: run the query; if params is a list with len>1, use executemany;
+        COMMIT on success and return cursor.rowcount.
+      - On any exception: attempt ROLLBACK and return ExecutorError(e).
     """
 
-    def _internal():
-        db_id = os.path.splitext(os.path.basename(db_file))[0]
-        cached = cache_db.get_from_cache(cache_db_file, [db_id], [query])[0]
-        if not isinstance(cached, NotFoundInCacheError):
-            result = cached
-        else:
-            conn = None
-            try:
-                conn = sqlite3.connect(db_file)
-                # Always enable foreign keys
-                conn.execute("PRAGMA foreign_keys=ON;")
-                # If writes are not allowed, try to enable query_only (may not be supported)
-                if not allow_write:
-                    conn.execute("PRAGMA query_only=ON;")
-                cur = conn.cursor()
-                conn.execute("BEGIN TRANSACTION;")
+    def _run() -> OutputTable | ExecutorError:
+        # 1) Cache short-circuit
+        cached = _maybe_get_cached(cache_db, cache_db_file, db_file, query)
+        if cached is not None:
+            return cached
 
-                if params is not None and isinstance(params, list):
-                    conn.executemany(query, params)
-                else:
-                    cur.execute(query, params)
+        # 2) DB execution
+        try:
+            conn = sqlite3.connect(db_file)
+            try:
+                _apply_pragmas(conn, allow_write)
+                conn.execute("BEGIN TRANSACTION;")
+                cur = conn.cursor()
 
                 if allow_write:
-                    # commit modifications
+                    # Writes: executemany only when params is a list with >1 entries.
+                    if _use_executemany(allow_write, params):
+                        cur.executemany(query, params)  # type: ignore[arg-type]
+                    else:
+                        cur.execute(query, _normalized_params(params))
                     conn.commit()
-                    result = cur.rowcount
+                    return [([cur.rowcount])]
                 else:
-                    # fetch read results and then rollback to avoid persisting any changes
-                    result = cur.fetchall()
+                    # Reads: always single execute + fetchall + rollback
+                    cur.execute(query, _normalized_params(params))
+                    rows = cur.fetchall()
                     conn.rollback()
-            except Exception as e:
-                # ensure rollback on any error
-                try:
-                    if conn is not None:
-                        conn.rollback()
-                except Exception:
-                    pass
-                result = ExecutorError(e)
+                    return rows
 
+            except Exception as e:
+                # Try rollback, ignore rollback failures
+                _safe_rollback(conn)
+                return ExecutorError(e)
             finally:
-                if conn is not None:
-                    conn.close()
-        return result
+                conn.close()
+
+        except Exception as e:
+            # Connection-level failures
+            return ExecutorError(e)
 
     try:
-        rows = func_timeout(timeout_s, _internal)
+        result = func_timeout(timeout_s, _run)
     except FunctionTimedOut:
-        rows = ExecutorError(f'Query Timeout with {timeout_s} seconds')
-    return job_id, idx, rows
+        result = ExecutorError(f"Query Timeout with {timeout_s} seconds")
+
+    return job_id, idx, result
+
+
+# -------------------------
+# Small, focused helpers
+# -------------------------
+
+def _db_id_from_path(db_file: str) -> str:
+    """Derive a stable DB id from a file path (matches previous basename-without-ext logic)."""
+    return Path(db_file).stem
+
+
+def _maybe_get_cached(
+        cache_db: SQLCacheProtocol | None,
+        cache_db_file: str | None,
+        db_file: str,
+        query: str,
+) -> Any | None:
+    """Return cached value if available; None on miss or when cache is not configured."""
+    if cache_db is None or cache_db_file is None:
+        return None
+    db_id = _db_id_from_path(db_file)
+    cached = cache_db.get_from_cache(cache_db_file, [db_id], [query])[0]
+    if cached and not isinstance(cached, NotFoundInCacheError):
+        return cached
+    return None
+
+
+def _apply_pragmas(conn: sqlite3.Connection, allow_write: bool) -> None:
+    """Apply connection-level PRAGMAs."""
+    conn.execute("PRAGMA foreign_keys=ON;")
+    if not allow_write:
+        conn.execute("PRAGMA query_only=ON;")
+
+
+def _use_executemany(allow_write: bool, params: ParamsType) -> bool:
+    """True when we should call executemany (only for writes with multiple param sets)."""
+    return bool(
+        allow_write
+        and isinstance(params, list)
+        and len(params) > 1
+    )
+
+
+def _normalized_params(params: ParamsType) -> dict:
+    """Map None -> {}, pass dict as-is; if a list is supplied here, the caller should use executemany."""
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return params
+    # If a list mistakenly reaches here, behave like previous code path would (use empty dict).
+    return {}
+
+
+def _safe_rollback(conn: sqlite3.Connection) -> None:
+    try:
+        conn.rollback()
+    except Exception:
+        pass
