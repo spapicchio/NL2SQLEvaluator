@@ -1,8 +1,8 @@
 from collections import Counter
 from enum import Enum
 
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import OutputTable
-from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import SingleTaskPred, SingleTaskTar
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
+from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import EvaluateTask
 from NL2SQLEvaluator.evaluator_nodes.utils import sort_with_different_types, get_majority_voting_values
 from NL2SQLEvaluator.node_registry import register_node
 
@@ -43,20 +43,20 @@ class QatchMetric(Enum):
 class QATCHEvaluator:
     def execute_metric(
             self,
-            multiple_tasks_preds: list[SingleTaskPred],
-            multiple_tasks_tar: list[SingleTaskTar],
-            metric: QatchMetric,
+            tasks: list[EvaluateTask],
+            metric: QatchMetric | str,
             *args,
             **kwargs
     ) -> list[float]:
-        self._validate_inputs(multiple_tasks_preds, multiple_tasks_tar)
         results = []
-        for pred, tar in zip(multiple_tasks_preds, multiple_tasks_tar):
-            tar: OutputTable = [
-                tuple(sort_with_different_types(row))
-                for row in tar[0]
-            ]  # since target has only one element
-            majority_vote: OutputTable = get_majority_voting_values(pred, count_cardinality_in_row=True)
+        metric = QatchMetric(metric)
+        for task in tasks:
+            tar = task.target[0]
+            pred = task.predictions
+
+            tar = OutputTable(rows=[tuple(sort_with_different_types(row)) for row in tar])
+            majority_vote = get_majority_voting_values(pred, count_cardinality_in_row=True)
+
             if majority_vote is None:
                 results.append(0.0)
             elif len(majority_vote) == len(tar) == 0:

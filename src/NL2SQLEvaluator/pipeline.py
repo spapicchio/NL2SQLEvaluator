@@ -4,7 +4,8 @@ from typing_extensions import Self
 
 from NL2SQLEvaluator.config import ScriptArgs, DatasetArgs, ModelArgs, PipelineArgs
 from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import OutputTable
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import evaluate_target_and_pred
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import get_node_from_registry
@@ -17,8 +18,8 @@ class PipelineInput(BaseModel):
     target_sql: list[list[str]]
     predictions: list[list[str]] | None = None
     input_seq: list[ChatMessageHF]
-    executed_tar_sqls: list[list[OutputTable]] | None = None
-    executed_pred_sqls: list[list[OutputTable]] | None = None
+    executed_tar_sqls: list[list[OutputTable] | ExecutorError] | None = None
+    executed_pred_sqls: list[list[OutputTable] | ExecutorError] | None = None
     scores: list[float] | None = None
 
     # validate target_sql, inputs seq and db_files all have same length
@@ -57,7 +58,10 @@ class PipelineInput(BaseModel):
         return pd.DataFrame(rows)
 
 
-def run_pipeline(data_input: PipelineInput, script_args: ScriptArgs, data_args: DatasetArgs, model_args: ModelArgs,
+def run_pipeline(data_input: PipelineInput,
+                 script_args: ScriptArgs,
+                 data_args: DatasetArgs,
+                 model_args: ModelArgs,
                  pipeline_args: PipelineArgs) -> PipelineInput:
     logger.info("Running evaluation with args:", (script_args, data_args, model_args, pipeline_args))
     predictor, cache_db, db_executor, evaluator = _get_pipeline_nodes(pipeline_args)

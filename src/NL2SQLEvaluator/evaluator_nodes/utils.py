@@ -1,5 +1,7 @@
 from collections import Counter
 
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
+
 
 def sort_with_different_types(arr: tuple) -> tuple:
     return tuple(sorted(arr, key=sort_key))
@@ -15,11 +17,10 @@ def sort_key(x):
         return 2, str(raw)
 
 
-def get_majority_voting_values(values: list[list[tuple]], count_cardinality_in_row: bool) -> tuple | None | frozenset:
+def get_majority_voting_values(values: list[OutputTable], count_cardinality_in_row: bool) -> OutputTable | None:
     counter = Counter()
     for pred_n in values:
-        if pred_n is None:
-            # Todo check with prediction
+        if pred_n is None or isinstance(pred_n, Exception):
             continue
 
         if count_cardinality_in_row:

@@ -1,38 +1,50 @@
 import re
-from typing import Protocol, TypeAlias, Any
+from typing import Protocol, Any, Iterator, Self
 
-Row: TypeAlias = tuple[Any]
-OutputTable: TypeAlias = list[Row]
+from pydantic import BaseModel, model_validator
+
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable, SQLCacheProtocol
 
 
 class ExecutorError(Exception):
     pass
 
 
-class NotFoundInCacheError(Exception):
-    """Raised when an item is not found in the cache."""
-    pass
+class ExecuteTask(BaseModel):
+    db_files: list[str] | str
+    queries: list[str]
+    params: list[dict] | dict | None = None
+    db_ids: list[str] | None = None
 
+    # validate target_sql, inputs seq and db_files all have same length
+    @model_validator(mode='after')
+    def check_len(self) -> Self:
+        if isinstance(self.db_files, str):
+            self.db_files = [self.db_files for _ in self.queries]
 
-class SQLCacheProtocol(Protocol):
-    @staticmethod
-    def set_in_cache(db_file: str, db_ids: list[str], queries: list[str],
-                     executed_query: list[OutputTable]) -> None:
-        """Save a file with the given name and parameters."""
-        ...
+        if self.params is None:
+            self.params = [{} for _ in self.queries]
+        elif isinstance(self.params, dict):
+            self.params = [self.params for _ in self.queries]
 
-    @staticmethod
-    def get_from_cache(db_file: str, db_ids: list[str], queries: list[str]) -> list[OutputTable | NotFoundInCacheError]:
-        """Retrieve a file with the given name and parameters."""
-        ...
+        len_queries = len(self.queries)
+        if not len(self.db_files) == len_queries:
+            raise ValueError(f"Length of db_files {len(self.db_files)} must match length of queries {len_queries}.")
+        if not len(self.params) == len_queries:
+            raise ValueError("Length of params must match length of queries.")
+        if self.db_ids is not None and len(self.db_ids) == len_queries:
+            raise ValueError("Length of db_ids must match length of queries.")
+
+        return self
+
+    def __iter__(self) -> Iterator[Any]:
+        return iter(zip(self.queries, self.params, self.db_files))
 
 
 class DbReaderProtocol(Protocol):
     @staticmethod
     def execute_queries(
-            db_files: list[str],
-            queries: list[list[str]],
-            params: list[dict] | None = None,
+            tasks: list[ExecuteTask],
             cache_db: SQLCacheProtocol | None = None,
             cache_db_file: str | None = None,
             *args, **kwargs
@@ -64,5 +76,14 @@ def execute_queries_in_model_predictions(
         cache_db_file: str | None = None,
         *args, **kwargs
 ) -> list[list[OutputTable | ExecutorError]]:
-    queries = [[extract_sql_or_same(query) for query in query_list] for query_list in queries]
-    return db_executor.execute_queries(db_files, queries, params, sql_cache_protocol, cache_db_file, *args, **kwargs)
+    tasks = [
+        ExecuteTask(
+            db_files=db_files[i],
+            queries=[extract_sql_or_same(query) for query in queries[i]],
+            params=params[i] if params is not None else None
+        )
+        for i in range(len(db_files))
+    ]
+
+    return db_executor.execute_queries(tasks=tasks, cache_db=sql_cache_protocol, cache_db_file=cache_db_file,
+                                       *args, **kwargs)

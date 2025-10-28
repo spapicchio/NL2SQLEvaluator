@@ -22,6 +22,7 @@ class ScriptArgs:
         metadata={"help": "Number of experiment runs to compute standard deviation over"}
     )
 
+
 @dataclass
 class DatasetArgs:
     dataset_path: str | None = field(
@@ -47,6 +48,7 @@ class DatasetArgs:
         default='SQL',
         metadata={"help": "Name of the column containing target SQL queries in the dataset"}
     )
+
 
 @dataclass
 class ModelArgs:
