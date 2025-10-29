@@ -1,11 +1,11 @@
 import pandas as pd
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, ConfigDict
 from typing_extensions import Self
 
 from NL2SQLEvaluator.config import ScriptArgs, DatasetArgs, ModelArgs, PipelineArgs
 from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import evaluate_target_and_pred
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import get_node_from_registry
@@ -13,27 +13,30 @@ from NL2SQLEvaluator.node_registry import get_node_from_registry
 logger = get_logger(__name__)
 
 
-class PipelineInput(BaseModel):
-    db_files: list[str]
-    target_sql: list[list[str]]
-    predictions: list[list[str]] | None = None
-    input_seq: list[ChatMessageHF]
-    executed_tar_sqls: list[list[OutputTable] | ExecutorError] | None = None
-    executed_pred_sqls: list[list[OutputTable] | ExecutorError] | None = None
-    scores: list[float] | None = None
+class PipelineTask(BaseModel):
+    db_file: str
+    target_sql: list[str]
+    predictions: list[str] | None = None
+    input_seq: ChatMessageHF | None = None
+    executed_tar_sqls: list[OutputTable | ExecutorError] | None = None
+    executed_pred_sqls: list[OutputTable | ExecutorError] | None = None
+    score: float | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # validate target_sql, inputs seq and db_files all have same length
     @model_validator(mode='after')
     def check_len(self) -> Self:
-        are_equal = len(self.db_files) == len(self.target_sql) == len(self.input_seq)
+        are_equal = True
+        if self.predictions is None and self.input_seq is None:
+            raise ValueError("Must provide at least input_seq or predictions.")
+
         if self.predictions is not None:
-            are_equal = are_equal and (len(self.predictions) == len(self.db_files))
+            are_equal = are_equal and (len(self.predictions) == len(self.target_sql))
         if self.executed_tar_sqls is not None:
-            are_equal = are_equal and (len(self.executed_tar_sqls) == len(self.db_files))
+            are_equal = are_equal and (len(self.executed_tar_sqls) == len(self.target_sql))
         if self.executed_pred_sqls is not None:
-            are_equal = are_equal and (len(self.executed_pred_sqls) == len(self.db_files))
-        if self.scores is not None:
-            are_equal = are_equal and (len(self.scores) == len(self.db_files))
+            are_equal = are_equal and (len(self.executed_pred_sqls) == len(self.target_sql))
 
         if not are_equal:
             raise ValueError(
@@ -58,68 +61,85 @@ class PipelineInput(BaseModel):
         return pd.DataFrame(rows)
 
 
-def run_pipeline(data_input: PipelineInput,
-                 script_args: ScriptArgs,
-                 data_args: DatasetArgs,
-                 model_args: ModelArgs,
-                 pipeline_args: PipelineArgs) -> PipelineInput:
+def run_pipeline(pipeline_tasks=list[PipelineTask],
+                 script_args: ScriptArgs = ScriptArgs(),
+                 data_args: DatasetArgs = DatasetArgs(),
+                 model_args: ModelArgs = ModelArgs(),
+                 pipeline_args: PipelineArgs = PipelineArgs()) -> list[PipelineTask]:
     logger.info("Running evaluation with args:", (script_args, data_args, model_args, pipeline_args))
     predictor, cache_db, db_executor, evaluator = _get_pipeline_nodes(pipeline_args)
-    data_with_predictions = _get_predictions(data_input, predictor, model_args)
+
+    data_with_predictions = _get_predictions(pipeline_tasks, predictor, model_args)
     data_with_executed_sqls = _execute_sqls(data_with_predictions, db_executor, cache_db,
-                                            script_args.cache_db_file_path)
+                                            script_args.cache_db_file_path,
+                                            script_args.execution_timeout)
     return _evaluate(data_with_executed_sqls, evaluator)
 
 
-def _get_predictions(data_input: PipelineInput, predictor, model_args: ModelArgs) -> PipelineInput:
-    if data_input.predictions is not None:
-        logger.info("Predictions already exist in input, skipping prediction step.")
-        return data_input
+def _get_predictions(pipeline_tasks: list[PipelineTask], predictor, model_args: ModelArgs) -> list[PipelineTask]:
+    tasks_input_seq = [task.input_seq for task in pipeline_tasks]
+    if tasks_input_seq[0] is None:
+        return pipeline_tasks
 
     from NL2SQLEvaluator.predictor_nodes.predictor_protocol import generate_predictions
     predictions = generate_predictions(
         predictor=predictor,
         model_name=model_args.model_name_or_path,
-        multiple_tasks_messages=data_input.input_seq,
+        multiple_tasks_messages=tasks_input_seq,
         model_args=model_args)
 
-    return data_input.model_copy(update={"predictions": predictions})
+    return [task.model_copy(update={"predictions": predictions}) for task in pipeline_tasks]
 
 
-def _execute_sqls(data_input: PipelineInput, db_executor, cache_db, cache_db_file) -> PipelineInput:
+def _execute_sqls(pipeline_tasks: list[PipelineTask], db_executor, cache_db, cache_db_file, timeout) -> list[
+    PipelineTask]:
     from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import execute_queries_in_model_predictions
-    to_be_executed = data_input.target_sql + data_input.predictions
+    to_be_executed = []
+    [to_be_executed.append(task.target_sql) for task in pipeline_tasks]
+    [to_be_executed.append(task.predictions) for task in pipeline_tasks]
+    db_files = [task.db_file for task in pipeline_tasks] * 2
+
     executed_queries = execute_queries_in_model_predictions(
         db_executor=db_executor,
-        db_files=data_input.db_files,
+        db_files=db_files,
         queries=to_be_executed,
         params=None,
         sql_cache_protocol=cache_db,
         cache_db_file=cache_db_file,
+        timeout=timeout,
     )
-    executed_tar_sqls = executed_queries[: len(data_input.target_sql)]
-    executed_pred_sqls = executed_queries[len(data_input.target_sql):]
+    executed_tar_sqls = executed_queries[: len(pipeline_tasks)]
+    executed_pred_sqls = executed_queries[len(pipeline_tasks):]
 
-    return data_input.model_copy(update={
-        "executed_tar_sqls": executed_tar_sqls,
-        "executed_pred_sqls": executed_pred_sqls
-    })
+    return [
+        task.model_copy(update={"executed_tar_sqls": executed_tar_sqls, "executed_pred_sqls": executed_pred_sqls})
+        for task in pipeline_tasks
+    ]
 
 
-def _evaluate(data_input: PipelineInput, evaluator):
+def _evaluate(pipeline_tasks: list[PipelineTask], evaluator) -> list[PipelineTask]:
+    executed_pred = []
+    executed_target = []
+    for task in pipeline_tasks:
+        executed_pred.append(task.executed_pred_sqls)
+        executed_target.append(task.executed_tar_sqls)
+
     evaluation_results = evaluate_target_and_pred(
         evaluator,
-        multiple_tasks_preds=data_input.executed_pred_sqls,
-        multiple_tasks_tars=data_input.executed_tar_sqls
+        multiple_tasks_preds=executed_pred,
+        multiple_tasks_tars=executed_target
     )
-    return data_input.model_copy(update={"scores": evaluation_results})
+    return [task.model_copy(update={"score": evaluation_results}) for task in pipeline_tasks]
 
 
 def _get_pipeline_nodes(pipeline_args: PipelineArgs):
-    predictor = get_node_from_registry('predictor_nodes', pipeline_args.predictor_node)
+    predictor = None
+    if pipeline_args.predictor_node is not None:
+        predictor = get_node_from_registry('predictor_nodes', pipeline_args.predictor_node)
     cache_db = None
     if pipeline_args.sql_cache_node:
         cache_db = get_node_from_registry('db_executor_nodes', pipeline_args.sql_cache_node)
+
     db_executor = get_node_from_registry('db_executor_nodes', pipeline_args.db_executor_node)
     evaluator = get_node_from_registry('evaluator_nodes', pipeline_args.evaluator_node)
     return predictor, cache_db, db_executor, evaluator

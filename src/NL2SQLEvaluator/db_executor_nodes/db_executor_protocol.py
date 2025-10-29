@@ -76,6 +76,7 @@ def execute_queries_in_model_predictions(
         cache_db_file: str | None = None,
         *args, **kwargs
 ) -> list[list[OutputTable | ExecutorError]]:
+    assert len(db_files) == len(queries)
     tasks = [
         ExecuteTask(
             db_files=db_files[i],

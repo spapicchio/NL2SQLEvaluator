@@ -21,6 +21,7 @@ def register_node(
             logger.warning("Class '%s' is already registered in '%s'. Skipping.", name, module_key)
         else:
             bucket[name] = node
+        logger.debug(f"Registered node `{name}` under package `{module_key}`")
         return node
 
     return decorator
@@ -32,7 +33,7 @@ def get_node_from_registry(package_name, fun_name: str) -> Any:
     bucket = _registry[package_name]
     if fun_name not in bucket:
         raise KeyError(f"Function/Class '{fun_name}' not found in package '{package_name}'.")
-    return bucket[fun_name]
+    return bucket[fun_name]()
 
 
 def get_available_functions(package_name) -> list[str]:

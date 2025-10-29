@@ -21,15 +21,19 @@ class ScriptArgs:
         default=1,
         metadata={"help": "Number of experiment runs to compute standard deviation over"}
     )
+    execution_timeout: int = field(
+        default=500,
+        metadata={"help": "Timeout in seconds for executing SQL queries against the database"}
+    )
 
 
 @dataclass
 class DatasetArgs:
     dataset_path: str | None = field(
-        default="simone-papicchio/bird",
+        default="data/omnisql/data/train_bird_processed.json",
     )
     relative_db_base_path: str = field(
-        default="data/bird_dev/dev_databases",
+        default="data/omnisql/data/bird/train/train_databases",
         metadata={"help": "Relative path to the database files directory"}
     )
     pred_col_name: str = field(
@@ -140,14 +144,14 @@ class PipelineArgs:
             "help": f"Predictor node to use for generating predictions. Available predictors: {get_available_functions('predictor_nodes')} "}
     )
     db_executor_node: str = field(
-        default="SQLiteExecutor",
+        default="SQLiteDBExecutor",
         metadata={
             "help": f"Database executor node to use for executing SQL queries. Available executors: {get_available_functions('db_executor_nodes')}"}
     )
     sql_cache_node: str = field(
-        default="SQLCacheNode",
+        default="SqliteCache",
         metadata={
-            "help": f"SQL cache node to use for caching generated SQL queries. Available cache nodes: {[n for n in get_available_functions('db_executor_nodes') if 'cache' in n.lower()]}"}
+            "help": f"SQL cache node to use for caching generated SQL queries. Available cache nodes: {get_available_functions('db_executor_nodes')}"}
     )
     evaluator_node: str = field(
         default="BirdEXEvaluator",
