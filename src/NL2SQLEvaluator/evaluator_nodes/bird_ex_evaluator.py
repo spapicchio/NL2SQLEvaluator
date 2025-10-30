@@ -26,6 +26,7 @@ class BirdEXEvaluator:
             return 1.0
         if len(task.target) == 0:
             logger.warning('No target provided for EX evaluation, returning 0.0')
+            return 0.0
 
         target = frozenset(task.target[0])
         majority_vote = get_majority_voting_values(task.predictions, count_cardinality_in_row=False)

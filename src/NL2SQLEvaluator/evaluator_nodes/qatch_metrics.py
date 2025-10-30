@@ -56,6 +56,8 @@ class QATCHEvaluator:
         for task in tasks:
             if len(task.target) == 0:
                 logger.warning('No target provided for EX evaluation, returning 0.0')
+                results.append(0.0)
+                continue
 
             tar = task.target[0]
             pred = task.predictions

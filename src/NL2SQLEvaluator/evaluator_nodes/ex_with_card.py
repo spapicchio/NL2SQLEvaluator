@@ -24,6 +24,7 @@ class EXEvaluator:
             return 1.0
         if len(task.target) == 0:
             logger.warning('No target provided for EX evaluation, returning 0.0')
+            return 0.0
 
         target = OutputTable(rows=[tuple(sort_with_different_types(row)) for row in task.target[0]])
         pred = get_majority_voting_values(task.predictions, count_cardinality_in_row=True)
