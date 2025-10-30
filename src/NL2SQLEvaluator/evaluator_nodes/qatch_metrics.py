@@ -4,7 +4,10 @@ from enum import Enum
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import EvaluateTask
 from NL2SQLEvaluator.evaluator_nodes.utils import sort_with_different_types, get_majority_voting_values
+from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
+
+logger = get_logger(__name__)
 
 
 class QatchMetric(Enum):
@@ -51,6 +54,9 @@ class QATCHEvaluator:
         results = []
         metric = QatchMetric(metric)
         for task in tasks:
+            if len(task.target) == 0:
+                logger.warning('No target provided for EX evaluation, returning 0.0')
+
             tar = task.target[0]
             pred = task.predictions
 

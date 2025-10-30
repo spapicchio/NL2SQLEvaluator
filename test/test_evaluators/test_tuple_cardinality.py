@@ -36,6 +36,16 @@ class TestTupleCardinality:
         result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
         assert result[0] == 0.5
 
+    def test_empty(self, executor):
+        multiple_tasks_tar = []
+        multiple_tasks_preds = [('c', 'd'), ('a', 1.0000000001)]
+        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
+        assert result[0] == 0.0
+        multiple_tasks_tar = []
+        multiple_tasks_preds = []
+        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
+        assert result[0] == 1.0
+
     def test_equal_but_different_projection(self, executor):
         multiple_tasks_tar = [('a', 'b'), ('c', 'd')]
         multiple_tasks_preds = [('b', 'a'), ('d', 'c')]

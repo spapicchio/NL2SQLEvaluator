@@ -8,7 +8,7 @@ from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import extract_sql_o
 from NL2SQLEvaluator.hf_parser import TrlParser
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import get_node_from_registry
-from NL2SQLEvaluator.pipeline import PipelineInput, run_pipeline
+from NL2SQLEvaluator.pipeline import run_pipeline
 
 logger = get_logger(__name__)
 
