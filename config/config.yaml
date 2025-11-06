@@ -1,0 +1,39 @@
+# config.yaml - defaults for ScriptArgs, DatasetArgs, ModelArgs, PipelineArgs
+output_dir: "./outputs"
+cache_db_file_path: "/home/papicchi/Think2SQL/.think2sql_cache/target_cached_query.sqlite"
+num_of_experiments_to_get_std: 1
+
+# Dataset Args
+dataset_path: "data/omnisql/data/train_bird_processed.json"
+relative_db_base_path: "data/omnisql/data/bird/train/train_databases"
+pred_col_name: null
+input_seq_col_name: "input_seq"
+db_id_col_name: "db_id"
+target_seq_col_name: "SQL"
+
+# Model Args
+model_name_or_path: "Qwen/Qwen3-4B-Thinking-2507"
+number_of_completions: 1
+temperature: 0.6
+top_p: 0.95
+top_k: 20
+repetition_penalty: 1.1
+frequency_penalty: 0.0
+presence_penalty: 0.0
+dtype: "bfloat16"
+tensor_parallel_size: 1
+data_parallel_size: 1
+vllm_server_host: "localhost"
+vllm_server_port: 8000
+litellm_provider: null
+gpu_memory_utilization: 0.95
+max_new_tokens: 8000
+max_model_length: 30000
+
+# Pipeline Args
+dataset_reader_node: "ReadBird"
+predictor_node: "VLLMPredictor"
+db_executor_node: "SQLiteDBExecutor"
+sql_cache_node: "SqliteCache"
+evaluator_node: "BirdEXEvaluator"
+saver_node: null

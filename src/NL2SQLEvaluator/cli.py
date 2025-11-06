@@ -1,94 +1,113 @@
-# args.py
-import pathlib
-from dataclasses import asdict
-from time import gmtime, strftime
+import dataclasses
+import os
+import statistics
 
-import wandb
-from dotenv import load_dotenv
-
-from NL2SQLEvaluator.hf_argument_parser import TrlParser
+from NL2SQLEvaluator.config import ScriptArgs, DatasetArgs, PipelineArgs, ModelArgs
+from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import read_data_from_file
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import extract_sql_or_same
+from NL2SQLEvaluator.hf_parser import TrlParser
 from NL2SQLEvaluator.logger import get_logger
-from NL2SQLEvaluator.main_run_evaluation import run_evaluation, ScriptArgs
-from NL2SQLEvaluator.orchestrator_state import AvailableDialect, AvailableMetrics
-from NL2SQLEvaluator.utils_wandb import utils_init_wandb, WandbArgs
+from NL2SQLEvaluator.node_registry import get_node_from_registry
+from NL2SQLEvaluator.pipeline import run_pipeline
 
-load_dotenv(override=True)
-
-
-def _main(script_args, wandb_args, **kwargs):
-    # Init W&B (respect wandb.mode: online|offline|disabled)
-    wandb_run = utils_init_wandb(wandb_args, run_name=f"eval__{script_args.dataset_name}")
-
-    # --- run evaluation ---
-    summary, df_samples = run_evaluation(script_args, **kwargs)
-
-    # --- Store Results ---
-    run_dir = pathlib.Path(script_args.output_dir)
-    today = str(strftime("%Y-%m-%d", gmtime()))
-    hours_minutes = str(strftime("%Hh-%Mm", gmtime()))
-
-    run_dir = run_dir / today / hours_minutes / f"{script_args.dataset_name}_s{script_args.seed}"
-
-    # if run_dir does not exist create it
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    if wandb_run is not None:
-        table = wandb.Table(columns=list(df_samples.columns))
-        for row in df_samples.itertuples(index=False):
-            # transform list element in row into str
-            row = tuple(str(x) if not isinstance(x, str) else x for x in row)
-            table.add_data(*row)
-        wandb.log({"table/dataset": table, **summary})
-        # Save per-sample as Parquet and log as an Artifact
-        out_parquet = run_dir / "dataset.parquet"
-        df_samples.to_parquet(out_parquet, index=False)
-        art = wandb.Artifact(
-            name=f"dataset_eval__{script_args.dataset_name}__{wandb_run.id}",
-            type="dataset",
-            metadata={
-                "wandb_id": wandb_run.id,
-                "data": script_args.dataset_name,
-            },
-        )
-        art.add_file(str(out_parquet))
-        wandb_run.log_artifact(art)
-
-        # Store the exact resolved config that produced this run
-        cfg_path = _save_used_cfg(run_dir, script_args, wandb_args, **kwargs)
-        cfg_art = wandb.Artifact(name=f"config_wandb_id_{wandb_run.id}", type="config")
-        cfg_art.add_file(str(cfg_path))
-        wandb_run.log_artifact(cfg_art)
-        wandb_run.finish()
-    else:
-        # Even with W&B disabled, keep local files for reproducibility
-        out_parquet = run_dir / "per_sample.parquet"
-        df_samples.to_parquet(out_parquet, index=False)
-        _save_used_cfg(run_dir, script_args, wandb_args, **kwargs)
-
-    get_logger(name='main').info(f"Done. Outputs in: {run_dir}")
+logger = get_logger(__name__)
 
 
-def _save_used_cfg(outdir, script_args, wandb_args, **kwargs):
-    cfg = asdict(script_args) | asdict(wandb_args) | kwargs
+@dataclasses.dataclass
+class SummaryResults:
+    strategy: str
+    model_name: str
+    dataset_name: str
+    metric: str
+    value: float
+    std: float
 
-    out_file = outdir / "resolved_config.yaml"
-    out_file.write_text(
-        "\n".join([f"{k}: {v}" for k, v in cfg.items()])
+
+def run_evaluation(script_args: ScriptArgs, data_args: DatasetArgs, model_args: ModelArgs, pipeline_args: PipelineArgs):
+    logger.info("Args: %s", (script_args, data_args, model_args, pipeline_args))
+    # read dataset:
+    reader = get_node_from_registry('dataset_reader_nodes', pipeline_args.dataset_reader_node)
+    dataset = read_data_from_file(reader, data_args.dataset_path, base_db_path=data_args.relative_db_base_path)
+    dataset = dataset[:10]
+    if not dataset:
+        logger.warning("Empty dataset: %s", data_args.dataset_path)
+
+    num_experiments = script_args.num_of_experiments_to_get_std if model_args.temperature > 0 else 1
+    logger.info(f'Running {num_experiments} experiments to calculate standard deviation.')
+    db_files, target_sqls, pred_sqls, input_seqs = _prepare_input(dataset, data_args)
+    data_input = PipelineInput(
+        db_files=db_files * num_experiments,
+        target_sql=target_sqls * num_experiments,
+        predictions=pred_sqls * num_experiments if data_args.pred_col_name else None,
+        input_seq=input_seqs * num_experiments
     )
 
-    return out_file
+    data_with_scores = run_pipeline(data_input, script_args, data_args, model_args, pipeline_args)
+    df = data_with_scores.to_pandas()
+
+    ex_n = []
+    for i in range(num_experiments):
+        start = i * len(dataset)
+        end = start + len(dataset)
+        n_pred = data_with_scores.predictions[start:end]
+        n_scores = data_with_scores.scores[start:end]
+        df[f'{model_args.model_name_or_path}_{i}'] = n_pred
+        df[f'{pipeline_args.evaluator_node}_{i}'] = n_scores
+        queries_i = [[extract_sql_or_same(query) for query in query_list] for query_list in n_pred]
+        ex_n.append(statistics.mean(n_scores))
+        df[f'predicted_SQL_{i}'] = queries_i
+        df[f'EX_{i}'] = n_scores
+
+    summary_results = SummaryResults(
+        strategy='greedy' if model_args.number_of_completions == 1 else 'majority_voting',
+        model_name=model_args.model_name_or_path,
+        dataset_name=os.path.basename(data_args.dataset_path),
+        metric=pipeline_args.evaluator_node,
+        value=statistics.mean(ex_n) * 100,
+        std=(statistics.stdev(ex_n) * 100) if len(ex_n) > 1 else 0.0
+    )
+
+    logger.warning(summary_results)
+
+    if pipeline_args.saver_node is not None:
+        saver = get_node_from_registry('saver_nodes', pipeline_args.saver_node)
+        saver.save(script_args.output_dir, df=df,
+                   configs=(script_args, data_args, model_args, pipeline_args, summary_results))
+
+    return data_input.scores
 
 
-def cli():
-    """CLI entry point that handles argument parsing."""
-    parser = TrlParser((ScriptArgs, WandbArgs))
-    (script_args, wandb_args), config_remaining_strings = parser.parse_args_and_config(fail_with_unknown_args=False)
+def _prepare_input(dataset, data_args):
+    db_files = []
+    target_sqls = []
+    pred_sqls = []
+    input_seqs = []
+    for item in dataset:
+        db_files.append(item['db_file'])
 
-    script_args.database_dialect = AvailableDialect(script_args.database_dialect)
-    script_args.metrics = [AvailableMetrics(metric) for metric in script_args.metrics]
+        target_ = item[data_args.target_seq_col_name]
+        if isinstance(target_, str):
+            target_ = [target_]
+        target_sqls.append(target_)
 
-    _main(script_args, wandb_args, **config_remaining_strings)
+        pred_ = None
+        if data_args.pred_col_name:
+            pred_ = item[data_args.pred_col_name]
+            if isinstance(pred_, str):
+                pred_ = [pred_]
+
+        pred_sqls.append(pred_)
+
+        input_seqs.append(item[data_args.input_seq_col_name])
+
+    return db_files, target_sqls, pred_sqls, input_seqs
+
+
+def main():
+    parser = TrlParser(dataclass_types=[ScriptArgs, DatasetArgs, ModelArgs, PipelineArgs])  # or [ScriptArgs]
+    script_args, data_args, model_args, pipeline_args = parser.parse_args_and_config()
+    run_evaluation(script_args, data_args, model_args, pipeline_args)
 
 
 if __name__ == "__main__":
-    cli()
+    main()
