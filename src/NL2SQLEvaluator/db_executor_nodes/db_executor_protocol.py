@@ -1,9 +1,8 @@
 import re
 from typing import Protocol, Any, Iterator, Self
 
-from pydantic import BaseModel, model_validator
-
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable, SQLCacheProtocol
+from pydantic import BaseModel, model_validator
 
 
 class ExecutorError(Exception):
@@ -15,6 +14,7 @@ class ExecuteTask(BaseModel):
     queries: list[str]
     params: list[dict] | dict | None = None
     db_ids: list[str] | None = None
+    timeout: float | int | list[float | int] = 500
 
     # validate target_sql, inputs seq and db_files all have same length
     @model_validator(mode='after')
@@ -24,12 +24,16 @@ class ExecuteTask(BaseModel):
 
         if self.params is None:
             self.params = [{} for _ in self.queries]
+        if isinstance(self.timeout, (float, int)):
+            self.timeout = [self.timeout for _ in self.queries]
         elif isinstance(self.params, dict):
             self.params = [self.params for _ in self.queries]
 
         len_queries = len(self.queries)
         if not len(self.db_files) == len_queries:
             raise ValueError(f"Length of db_files {len(self.db_files)} must match length of queries {len_queries}.")
+        if not len(self.timeout) == len_queries:
+            raise ValueError("Length of timeout must match length of queries.")
         if not len(self.params) == len_queries:
             raise ValueError("Length of params must match length of queries.")
         if self.db_ids is not None and len(self.db_ids) == len_queries:
@@ -38,7 +42,7 @@ class ExecuteTask(BaseModel):
         return self
 
     def __iter__(self) -> Iterator[Any]:
-        return iter(zip(self.queries, self.params, self.db_files))
+        return iter(zip(self.queries, self.params, self.db_files, self.timeout))
 
 
 class DbReaderProtocol(Protocol):

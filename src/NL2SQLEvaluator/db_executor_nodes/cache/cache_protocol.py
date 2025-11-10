@@ -12,6 +12,7 @@ class NotFoundInCacheError(Exception):
 
 class OutputTable(BaseModel):
     rows: list[tuple | list]
+    executed_time: float | None = None
 
     @model_validator(mode='after')
     def forbid_inner_lists(self) -> Self:
@@ -57,6 +58,12 @@ class OutputTable(BaseModel):
     def decompress(self) -> Self:
         import pickle
         return pickle.loads(self.rows[0][0]) if self.rows and self.rows[0] else self
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, OutputTable):
+            return self.rows == other.rows
+        return NotImplemented
+
 
 
 class DataToFetch(BaseModel):

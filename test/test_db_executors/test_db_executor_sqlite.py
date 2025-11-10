@@ -1,7 +1,6 @@
 import sqlite3
 
 import pytest
-
 from NL2SQLEvaluator.db_executor_nodes import SQLiteDBExecutor
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecuteTask
@@ -220,8 +219,9 @@ class TestSqliteDbExecutor:
                         SELECT x
                         FROM cnt;
                     """
-                ])],
-            timeout=10,
+                ],
+                timeout=10
+            )],
             num_cpus=1,
         )
         assert isinstance(res[0][0], ExecutorError)
@@ -243,8 +243,10 @@ class TestSqliteDbExecutor:
                                 SELECT x
                                 FROM cnt;
                             """
-                        ] * 5)],
-            timeout=10,
+                        ] * 5,
+                timeout=[5, 2, 10, 3, 10]
+            )],
+
         )
         assert isinstance(res[0][0], ExecutorError)
         assert isinstance(res[0][1], ExecutorError)
@@ -261,8 +263,10 @@ class TestSqliteDbExecutor:
                     "SELECT * FROM non_existent_table",
                     "SELECT name FROM users WHERE age = 25",
                     "MALFORMED SQL STATEMENT",
-                ])],
+                ],
             timeout=5,
+            )],
+
             num_cpus=1,
         )
         assert isinstance(res[0][0], ExecutorError)

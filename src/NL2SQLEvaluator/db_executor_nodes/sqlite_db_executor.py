@@ -1,14 +1,14 @@
 import multiprocessing as mp
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, TypeAlias
-
-from func_timeout import func_timeout, FunctionTimedOut
 
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import NotFoundInCacheError, OutputTable, SQLCacheProtocol, \
     DataToFetch
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, ExecuteTask
 from NL2SQLEvaluator.node_registry import register_node
+from func_timeout import func_timeout, FunctionTimedOut
 
 ParamsType: TypeAlias = list[dict] | dict | None
 
@@ -24,8 +24,7 @@ class SQLiteDBExecutor:
             *args, **kwargs
     ) -> list[list[OutputTable | ExecutorError]]:
 
-        timeout_s = kwargs.get("timeout", 10)
-        tasks_mp = _build_task_for_mp(tasks, timeout_s, cache_db, cache_db_file, allow_write)
+        tasks_mp = _build_task_for_mp(tasks, cache_db, cache_db_file, allow_write)
         total_tasks = len(tasks_mp)
         default_procs = min(max(1, mp.cpu_count()), max(1, total_tasks))
         num_cpus: int = kwargs.get("num_cpus", default_procs)
@@ -45,12 +44,12 @@ class SQLiteDBExecutor:
         return results
 
 
-def _build_task_for_mp(tasks: list[ExecuteTask], timeout_s, cache_db, cache_db_file, allow_write):
+def _build_task_for_mp(tasks: list[ExecuteTask], cache_db, cache_db_file, allow_write):
     flattened_tasks = []
     for job_id, task in enumerate(tasks):
-        for idx, (query, params, db_file) in enumerate(task):
+        for idx, (query, params, db_file, timeout) in enumerate(task):
             flattened_tasks.append(
-                (job_id, idx, db_file, query, timeout_s, allow_write, params, cache_db, cache_db_file))
+                (job_id, idx, db_file, query, timeout, allow_write, params, cache_db, cache_db_file))
     return flattened_tasks
 
 
@@ -81,7 +80,7 @@ def _execute_single_query(
         cached = _maybe_get_cached(cache_db, cache_db_file, db_file, query)
         if cached is not None:
             return cached
-
+        start_time = time.perf_counter()
         # 2) DB execution
         try:
             conn = sqlite3.connect(db_file)
@@ -96,14 +95,18 @@ def _execute_single_query(
                 if allow_write:
                     cur.execute(query, params or {})
                     conn.commit()
-                    return OutputTable(rows=[([cur.rowcount])])
+                    elapsed = time.perf_counter() - start_time
+                    safe_time = elapsed + (elapsed * 0.25)
+                    return OutputTable(rows=[([cur.rowcount])], executed_time=safe_time)
 
                 else:
                     # Reads: always single execute + fetchall + rollback
                     cur.execute(query, params or {})
                     rows = cur.fetchall()
                     conn.rollback()
-                    return OutputTable(rows=rows)
+                    elapsed = time.perf_counter() - start_time
+                    safe_time = elapsed + (elapsed * 0.10)
+                    return OutputTable(rows=rows, executed_time=safe_time)
 
             except Exception as e:
                 # Try rollback, ignore rollback failures
