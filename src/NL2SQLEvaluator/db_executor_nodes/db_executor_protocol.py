@@ -1,8 +1,9 @@
 import re
 from typing import Protocol, Any, Iterator, Self
 
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable, SQLCacheProtocol
 from pydantic import BaseModel, model_validator
+
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import SQLCacheProtocol, OutputTable
 
 
 class ExecutorError(Exception):
@@ -67,6 +68,7 @@ def get_last_pattern_or_same(generation: str, pattern: str):
 def extract_sql_or_same(generation: str):
     sql_from_answer_tag = get_last_pattern_or_same(generation, r"<answer>(.*?)</answer>")
     sql_without_quotes = get_last_pattern_or_same(sql_from_answer_tag, r"```sql(.*?)```")
+    sql_without_quotes = get_last_pattern_or_same(sql_without_quotes, r"```(.*?)```")
     sql_cleaned = sql_without_quotes.strip().strip("`").strip()
     return sql_cleaned
 
