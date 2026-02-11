@@ -11,10 +11,10 @@ How:
 import pytest
 from pydantic import ValidationError
 
-from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import read_data_from_file, DataInput, DataReaderProtocol
+from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import read_data_from_file, DataInput, DataReadProcessProtocol
 
 
-class MockReader(DataReaderProtocol):
+class MockReader(DataReadProcessProtocol):
     """A helper class that conforms to DataReaderProtocol for testing."""
 
     def read(self, file_path: str, **kwargs) -> list:

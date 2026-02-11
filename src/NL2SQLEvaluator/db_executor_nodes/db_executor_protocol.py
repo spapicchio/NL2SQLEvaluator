@@ -1,96 +1,153 @@
+"""Module for optimized code execution via database grouping.
+
+This module handles the logic of taking multiple code prediction batches,
+grouping them by database to minimize connection overhead, and reassembling 
+them into the original request order.
+
+Example:
+    If input is:
+        Batch 0 (DB_A): ["Q1"]
+        Batch 1 (DB_B): ["Q2", "Q3"]
+        Batch 2 (DB_A): ["Q4"]
+
+    The logic groups them as:
+        Task 1 (DB_A): ["Q1", "Q4"] -> Results: [R1, R4]
+        Task 2 (DB_B): ["Q2", "Q3"] -> Results: [R2, R3]
+
+    Using 'bookkeeping', it reassembles them to:
+        [[R1], [R2, R3], [R4]]
+"""
+
 import re
-from typing import Protocol, Any, Iterator, Self
+from collections import defaultdict
+from typing import Protocol, Any, Self, List, Optional, runtime_checkable
 
-from pydantic import BaseModel, model_validator
-
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import SQLCacheProtocol, OutputTable
+from pydantic import BaseModel, model_validator, ConfigDict
 
 
 class ExecutorError(Exception):
+    """Raised when a database execution fails or times out."""
     pass
 
 
-class ExecuteTask(BaseModel):
-    db_files: list[str] | str
+class TaskToBeExecuted(BaseModel):
+    """Represents a set of queries to be executed on a specific database."""
+    model_config = ConfigDict(extra='allow')
+    db_path: str
     queries: list[str]
-    params: list[dict] | dict | None = None
-    db_ids: list[str] | None = None
-    timeout: float | int | list[float | int] = 500
+    db_id: Optional[str] = None
+    params: Optional[list[dict | tuple] | dict | tuple] = None
+    timeout: float = 500.0
 
-    # validate target_sql, inputs seq and db_files all have same length
     @model_validator(mode='after')
-    def check_len(self) -> Self:
-        if isinstance(self.db_files, str):
-            self.db_files = [self.db_files for _ in self.queries]
+    def broadcast_params(self) -> Self:
+        """Ensures params match the number of queries."""
+        if self.params is None or isinstance(self.params, (dict, tuple)):
+            p_val = self.params or {}
+            self.params = [p_val for _ in range(len(self.queries))]
 
-        if self.params is None:
-            self.params = [{} for _ in self.queries]
-        if isinstance(self.timeout, (float, int)):
-            self.timeout = [self.timeout for _ in self.queries]
-        elif isinstance(self.params, dict):
-            self.params = [self.params for _ in self.queries]
-
-        len_queries = len(self.queries)
-        if not len(self.db_files) == len_queries:
-            raise ValueError(f"Length of db_files {len(self.db_files)} must match length of queries {len_queries}.")
-        if not len(self.timeout) == len_queries:
-            raise ValueError("Length of timeout must match length of queries.")
-        if not len(self.params) == len_queries:
+        if len(self.params) != len(self.queries):
             raise ValueError("Length of params must match length of queries.")
-        if self.db_ids is not None and len(self.db_ids) == len_queries:
-            raise ValueError("Length of db_ids must match length of queries.")
-
         return self
 
-    def __iter__(self) -> Iterator[Any]:
-        return iter(zip(self.queries, self.params, self.db_files, self.timeout))
 
+@runtime_checkable
+class CodeExecuteProtocol(Protocol):
+    """Interface for database execution engines."""
 
-class DbReaderProtocol(Protocol):
-    @staticmethod
     def execute_queries(
-            tasks: list[ExecuteTask],
-            cache_db: SQLCacheProtocol | None = None,
-            cache_db_file: str | None = None,
-            *args, **kwargs
-    ) -> list[list[OutputTable | ExecutorError]]:
+            self,
+            tasks: List[TaskToBeExecuted],
+            cache_db: Optional[Any] = None,
+            cache_db_file: Optional[str] = None,
+            *args: Any,
+            **kwargs: Any
+    ) -> list[list[Any | ExecutorError]]:
         ...
 
 
-def get_last_pattern_or_same(generation: str, pattern: str):
-    matches = re.findall(pattern, generation, re.DOTALL | re.IGNORECASE)
-    if matches:
-        return matches[-1].strip()
-    else:
-        return generation
+# TODO move from this module
+def extract_last_match(text: str, pattern: str) -> str:
+    """Extracts the last match of a regex pattern or returns the original string."""
+    matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
+    return matches[-1].strip() if matches else text
 
 
-def extract_sql_or_same(generation: str):
-    sql_from_answer_tag = get_last_pattern_or_same(generation, r"<answer>(.*?)</answer>")
-    sql_without_quotes = get_last_pattern_or_same(sql_from_answer_tag, r"```sql(.*?)```")
-    sql_without_quotes = get_last_pattern_or_same(sql_without_quotes, r"```(.*?)```")
-    sql_cleaned = sql_without_quotes.strip().strip("`").strip()
-    return sql_cleaned
+# TODO move from this module
+def utils_extract_sql_or_same(generation: str) -> str:
+    """Parses SQL from LLM responses, looking for <answer> or code blocks."""
+    content = extract_last_match(generation, r"<answer>(.*?)</answer>")
+    content = extract_last_match(content, r"```sql\s*(.*?)\s*```")
+    content = extract_last_match(content, r"```\s*(.*?)\s*```")
+    return content.strip().strip("`").strip()
 
 
 def execute_queries_in_model_predictions(
-        db_executor: DbReaderProtocol,
-        db_files: list[str],
-        queries: list[list[str]],
-        params: list[dict] | None = None,
-        sql_cache_protocol: SQLCacheProtocol | None = None,
-        cache_db_file: str | None = None,
-        *args, **kwargs
-) -> list[list[OutputTable | ExecutorError]]:
-    assert len(db_files) == len(queries)
-    tasks = [
-        ExecuteTask(
-            db_files=db_files[i],
-            queries=[extract_sql_or_same(query) for query in queries[i]],
-            params=params[i] if params is not None else None
-        )
-        for i in range(len(db_files))
-    ]
+        code_executor: CodeExecuteProtocol,
+        db_files: List[str],
+        queries: List[List[str]],
+        params: Optional[list[list[dict | tuple] | dict | tuple]] = None,
+        cached_db: Optional[Any] = None,
+        cache_db_file: Optional[str] = None,
+        **kwargs: Any
+) -> list[list[Any | ExecutorError]]:
+    """Groups predictions by database and dispatches them for execution.
 
-    return db_executor.execute_queries(tasks=tasks, cache_db=sql_cache_protocol, cache_db_file=cache_db_file,
-                                       *args, **kwargs)
+    Args:
+        cached_db:
+        cache_db_file:
+        code_executor: Engine implementing the execution logic.
+        db_files: List of DB paths (determines the group).
+        queries: Nested list of SQL strings.
+        **kwargs: Configuration for TaskToBeExecuted (e.g., timeout).
+
+    Returns:
+        List of results matched to the input order of db_files.
+    """
+    if not isinstance(code_executor, CodeExecuteProtocol):
+        raise TypeError(f"Object {type(code_executor).__name__} does not implement CodeExecuteProtocol")
+
+    # storage maps db_path -> { queries_list, bookkeeping_info }
+    storage = defaultdict(lambda: {"queries": [], "params": [], "bookkeeping": []})
+
+    for i, db_path in enumerate(db_files):
+        group = storage[db_path]
+        queries_to_execute = queries[i]
+
+        start = len(group["queries"])
+        end = start + len(queries_to_execute)
+
+        group["queries"].extend(queries_to_execute)
+        group["params"].extend(params[i] if params else ())
+
+        # original_position: Where this batch sits in the user's input list
+        # result_segment: Which part of the combined results belongs to this batch
+        group["bookkeeping"].append({
+            "original_position": i,
+            "result_segment": slice(start, end)
+        })
+
+    # Execute all unique database tasks
+    storage_items = list(storage.items())
+    tasks = [
+        TaskToBeExecuted(db_path=p, queries=v["queries"], params=v["params"], **kwargs)
+        for p, v in storage_items
+    ]
+    all_results = code_executor.execute_queries(
+        tasks=tasks,
+        cache_db=cached_db,
+        cache_db_file=cache_db_file
+    )
+
+    # Reassemble results into the original input order
+    final_output = [[]] * len(db_files)
+    for task_idx, (db_path, data) in enumerate(storage_items):
+        # batch_results is the long list of results for one specific database
+        batch_results = all_results[task_idx]
+
+        for entry in data["bookkeeping"]:
+            pos = entry["original_position"]
+            seg = entry["result_segment"]
+            final_output[pos] = batch_results[seg]
+
+    return final_output
