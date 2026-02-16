@@ -6,7 +6,7 @@ Cypher, and SPARQL queries always return a uniform GenericOutputTable.
 
 from abc import ABC, abstractmethod
 from collections import Counter
-from typing import Self, Any, Iterator, Optional, override
+from typing import Self, Any, Optional, override
 
 from pydantic import BaseModel, model_validator, ConfigDict
 
@@ -46,8 +46,38 @@ class GenericOutputTable(BaseModel, ABC):
         pass
 
     def __len__(self):
-        """Returns the number of rows in the result set."""
         return len(self.rows)
+
+    def __call__(self, index: int | slice | None = None) -> Any:
+        """Access rows by index or slice. Returns all rows if index is None."""
+        if index is None:
+            return self.rows
+        if isinstance(index, (int, slice)):
+            return self.rows[index]
+        raise TypeError("index must be an int, slice, or None")
+
+    def __getitem__(self, item):
+        return self.rows[item]
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __call__(self, index: int | slice | None = None) -> Any:
+        """Access rows by index or slice. Returns all rows if index is None."""
+        if index is None:
+            return self.rows
+        if isinstance(index, (int, slice)):
+            return self.rows[index]
+        raise TypeError("index must be an int, slice, or None")
+
+    def __getitem__(self, item):
+        return self.rows[item]
+
+    def __contains__(self, item: Any) -> bool:
+        return item in self.rows
+
+    def __contains__(self, item: Any) -> bool:
+        return item in self.rows
 
 
 class SQLOutputTable(GenericOutputTable):
@@ -78,7 +108,7 @@ class SQLOutputTable(GenericOutputTable):
         return self
 
     @override
-    def is_equivalent_to(self, other: 'GenericOutputTable', is_row_order_important=True, *args, **kwargs) -> bool:
+    def is_equivalent_to(self, other: 'GenericOutputTable', *args, **kwargs) -> bool:
         """Compares two SQL tables for data equivalence.
 
         Args:
@@ -90,6 +120,12 @@ class SQLOutputTable(GenericOutputTable):
         Returns:
             bool: True if tables contain equivalent data.
         """
+        if 'is_row_order_important' not in kwargs:
+            raise ValueError(
+                "Missing required argument: `is_row_order_important` used to determine if row order matters for comparison.")
+
+        is_row_order_important = kwargs['is_row_order_important']
+
         if not isinstance(other, SQLOutputTable):
             return False
 
@@ -107,7 +143,7 @@ class SQLOutputTable(GenericOutputTable):
         return Counter(sorted_rows) == Counter(sorted_other_rows)
 
     @override
-    def compress(self) -> bytes:
+    def compress(self, *args, **kwargs) -> bytes:
         """Compresses the object state using zlib and pickle.
 
         Returns:
@@ -133,26 +169,6 @@ class SQLOutputTable(GenericOutputTable):
         import pickle
         state = pickle.loads(zlib.decompress(compressed_data))
         return self.__class__(**state)
-
-    def __len__(self):
-        return len(self.rows)
-
-    def __call__(self, index: int | slice | None = None) -> Any:
-        """Access rows by index or slice. Returns all rows if index is None."""
-        if index is None:
-            return self.rows
-        if isinstance(index, (int, slice)):
-            return self.rows[index]
-        raise TypeError("index must be an int, slice, or None")
-
-    def __getitem__(self, item):
-        return self.rows[item]
-
-    def __iter__(self) -> Iterator[Any]:
-        return iter(self.rows)
-
-    def __contains__(self, item: Any) -> bool:
-        return item in self.rows
 
     @staticmethod
     def universal_sort_key(x: Any) -> tuple[int, Any]:
