@@ -1,6 +1,7 @@
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import NotFoundInCacheError, OutputTable, DataToFetch, \
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import NotFoundInCacheError, DataToFetch, \
     DataToCache
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, ExecuteTask
+from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, TaskToBeExecuted
 from NL2SQLEvaluator.db_executor_nodes.sqlite_db_executor import SQLiteDBExecutor, _execute_single_query
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
@@ -43,12 +44,12 @@ class SqliteCache:
             data.model_dump(exclude={'result', 'dialect'}) | {'result': data.result.compress()}
             # This if is used to not store empty results which is used to detect if not found in cache
             if len(data.result) > 0 else data.model_dump(exclude={'result', 'dialect'}) | {
-                'result': OutputTable(rows=[('empty',)]).compress()}
+                'result': SQLOutputTable(rows=[('empty',)]).compress()}
             for data in data_to_cache
         ]
 
         results = SQLiteDBExecutor.execute_queries(
-            tasks=[ExecuteTask(
+            tasks=[TaskToBeExecuted(
                 db_files=db_file,
                 queries=[insert_sql] * len(params),
                 params=params,
@@ -61,7 +62,7 @@ class SqliteCache:
             logger.error(f'Impossible to set cache in the database. error: {results}')
 
     @staticmethod
-    def get_from_cache(db_file: str, data_to_fetch: list[DataToFetch]) -> list[OutputTable | NotFoundInCacheError]:
+    def get_from_cache(db_file: str, data_to_fetch: list[DataToFetch]) -> list[SQLOutputTable | NotFoundInCacheError]:
         """Retrieve a file with the given name and parameters."""
 
         if not _TABLE_EXISTS:
@@ -74,7 +75,7 @@ class SqliteCache:
                      """.strip()
         params = [data.model_dump(include={'hash_key'}) for data in data_to_fetch]
 
-        tasks = [ExecuteTask(
+        tasks = [TaskToBeExecuted(
             db_files=db_file,
             queries=[select_sql] * len(params),
             params=params,
@@ -90,7 +91,7 @@ class SqliteCache:
             if len(decompressed) == 0:
                 dec_results.append(NotFoundInCacheError())
             elif decompressed.rows == [('empty',)]:
-                dec_results.append(OutputTable(rows=[]))
+                dec_results.append(SQLOutputTable(rows=[]))
             else:
                 dec_results.append(decompressed)
         return dec_results

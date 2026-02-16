@@ -4,8 +4,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from NL2SQLEvaluator.db_executor_nodes import SQLiteDBExecutor
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable, SQLCacheProtocol
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import SQLCacheProtocol
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import TaskToBeExecuted, ExecutorError
+from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
 
 
 # Replace 'your_module' with the actual path to your SQLiteDBExecutor
@@ -36,7 +37,7 @@ class TestSQLiteDBExecutor:
         results = executor.execute_queries([task], allow_write=False)
 
         assert len(results) == 1
-        assert isinstance(results[0][0], OutputTable)
+        assert isinstance(results[0][0], SQLOutputTable)
         assert results[0][0].rows == [("Alice",), ("Bob",)]
 
     def test_execute_write_protection(self, db_setup):
@@ -63,9 +64,9 @@ class TestSQLiteDBExecutor:
 
         results = executor.execute_queries([task], allow_write=True)
 
-        assert isinstance(results[0][0], OutputTable)
+        assert isinstance(results[0][0], SQLOutputTable)
         # The code returns rowcount for write operations
-        assert results[0][0].rows == [([1])]
+        assert results[0][0].rows == [(1,)]
 
     def test_query_timeout(self, db_setup):
         """Tests that the executor kills long-running queries."""
@@ -96,13 +97,13 @@ class TestSQLiteDBExecutor:
         results = executor.execute_queries([task1, task2], num_cpus=2)
 
         assert len(results) == 2
-        assert results[0][0].rows == [(2,)]
-        assert results[1][0].rows == [("Alice",)]
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows == [(2,)]
+        assert not isinstance(results[1][0], ExecutorError) and results[1][0].rows == [("Alice",)]
 
     def test_cache_hit(self, db_setup):
         """Tests that the executor returns cached results if available."""
         mock_cache = MagicMock(spec=SQLCacheProtocol)
-        mock_output = OutputTable(rows=[("CachedName",)], executed_time=0.01)
+        mock_output = SQLOutputTable(rows=[("CachedName",)], execution_time=0.01)
 
         # Mocking the return value of get_from_cache
         # Note: In your code, it expects a list with an object that has a .result attribute
@@ -119,7 +120,7 @@ class TestSQLiteDBExecutor:
             cache_db_file="fake_cache.db"
         )
 
-        assert results[0][0].rows == [("CachedName",)]
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows == [("CachedName",)]
         mock_cache.get_from_cache.assert_called_once()
 
     def test_retrieve_preserves_request_order(self, tmp_path):
@@ -168,12 +169,12 @@ class TestSQLiteDBExecutor:
         assert len(results[1]) == 2, "Task 1 should have 2 results"
 
         # 5. Assertions for Content Order
-        assert results[0][0].rows == [(100,)]
-        assert results[0][1].rows == [(101,)]
-        assert results[0][2].rows == [(102,)]
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows == [(100,)]
+        assert not isinstance(results[0][1], ExecutorError) and results[0][1].rows == [(101,)]
+        assert not isinstance(results[0][2], ExecutorError) and results[0][2].rows == [(102,)]
 
-        assert results[1][0].rows == [(200,)]
-        assert results[1][1].rows == [(201,)]
+        assert not isinstance(results[1][0], ExecutorError) and results[1][0].rows == [(200,)]
+        assert not isinstance(results[1][1], ExecutorError) and results[1][1].rows == [(201,)]
 
     def test_query_with_special_characters(self, db_setup):
         """
@@ -205,52 +206,56 @@ class TestSQLiteDBExecutor:
         results = executor.execute_queries([task])
 
         # Assertions
-        assert isinstance(results[0][0], OutputTable), "Should handle newlines/tabs"
+        assert isinstance(results[0][0], SQLOutputTable), "Should handle newlines/tabs"
         assert results[0][0].rows == [("Alice",)]
 
-        assert isinstance(results[0][1], OutputTable), "Should handle trailing comments"
+        assert isinstance(results[0][1], SQLOutputTable), "Should handle trailing comments"
         assert results[0][1].rows == [("Alice",), ("Bob",)]
 
-        assert results[0][2].rows == [("🚀",)], "Should handle Unicode/Emojis"
+        assert not isinstance(results[0][2], ExecutorError) and results[0][2].rows == [
+            ("🚀",)], "Should handle Unicode/Emojis"
 
-        assert isinstance(results[0][3], OutputTable), "Should handle double-quoted identifiers"
+        assert isinstance(results[0][3], SQLOutputTable), "Should handle double-quoted identifiers"
         assert results[0][3].rows == [("Bob",)]
 
-        assert results[0][4].rows == [(1,)], "Should handle block comments"
+        assert not isinstance(results[0][4], ExecutorError) and results[0][4].rows == [
+            (1,)], "Should handle block comments"
 
-        def test_execute_with_params(self, db_setup):
-            """
-            Verifies that parameterized queries correctly map and protect data.
+    def test_execute_with_params(self, db_setup):
+        """
+        Verifies that parameterized queries correctly map and protect data.
 
-            Why: Using 'params' prevents SQL injection and allows the same query
-            structure to be reused with different values safely.
-            """
-            executor = SQLiteDBExecutor()
+        Why: Using 'params' prevents SQL injection and allows the same query
+        structure to be reused with different values safely.
+        """
+        executor = SQLiteDBExecutor()
 
-            # Test Case 1: Dictionary params (Named placeholders)
-            # Test Case 2: List of dictionaries (mapping to multiple queries)
-            queries = [
-                "SELECT id FROM users WHERE name = :name",
-                "SELECT name FROM users WHERE id = ?"
-            ]
+        # Test Case 1: Dictionary params (Named placeholders)
+        # Test Case 2: List of dictionaries (mapping to multiple queries)
+        queries = [
+            "SELECT id FROM users WHERE name = :name",
+            "SELECT name FROM users WHERE id = ?"
+        ]
 
-            # In TaskToBeExecuted, if params is a list, it must match queries length
-            params_list = [
-                {"name": "Alice"},  # For query 0
-                (2,)  # For query 1 (SQLite also supports tuples for ?)
-            ]
+        # In TaskToBeExecuted, if params is a list, it must match queries length
+        params_list = [
+            {"name": "Alice"},  # For query 0
+            (2,)  # For query 1 (SQLite also supports tuples for ?)
+        ]
 
-            task = TaskToBeExecuted(
-                db_path=db_setup,
-                queries=queries,
-                params=params_list
-            )
+        task = TaskToBeExecuted(
+            db_path=db_setup,
+            queries=queries,
+            params=params_list
+        )
 
-            results = executor.execute_queries([task])
+        results = executor.execute_queries([task])
 
-            # Assertions
-            assert results[0][0].rows == [(1,)], "Named parameters failed to match 'Alice' to ID 1"
-            assert results[0][1].rows == [("Bob",)], "Positional parameters failed to match ID 2 to 'Bob'"
+        # Assertions
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows == [
+            (1,)], "Named parameters failed to match 'Alice' to ID 1"
+        assert not isinstance(results[0][1], ExecutorError) and results[0][1].rows == [
+            ("Bob",)], "Positional parameters failed to match ID 2 to 'Bob'"
 
     def test_execute_with_params(self, db_setup):
         """
@@ -285,9 +290,12 @@ class TestSQLiteDBExecutor:
         results = executor.execute_queries([task])
 
         # Assertions
-        assert results[0][0].rows == [(1,)], "Named parameters failed to match 'Alice' to ID 1"
-        assert results[0][1].rows == [("Bob",)], "Positional parameters failed to match ID 2 to 'Bob'"
-        assert results[0][1].rows == [("Bob",)], "Positional parameters failed to match ID 2 to 'Bob'"
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows == [
+            (1,)], "Named parameters failed to match 'Alice' to ID 1"
+        assert not isinstance(results[0][1], ExecutorError) and results[0][1].rows == [
+            ("Bob",)], "Positional parameters failed to match ID 2 to 'Bob'"
+        assert not isinstance(results[0][1], ExecutorError) and results[0][1].rows == [
+            ("Bob",)], "Query without parameters should still execute correctly"
 
     def test_params_sql_injection_safety(self, db_setup):
         """
@@ -307,10 +315,10 @@ class TestSQLiteDBExecutor:
         results = executor.execute_queries([task])
 
         # The query should simply return no results, NOT drop the table
-        assert isinstance(results[0][0], OutputTable)
+        assert isinstance(results[0][0], SQLOutputTable)
         assert len(results[0][0].rows) == 0
 
         # Verify table still exists
         verify_task = TaskToBeExecuted(db_path=db_setup, queries=["SELECT COUNT(*) FROM users"])
-        verify_res = executor.execute_queries([verify_task])
-        assert verify_res[0][0].rows[0][0] == 2
+        results = executor.execute_queries([verify_task])
+        assert not isinstance(results[0][0], ExecutorError) and results[0][0].rows[0][0] == 2

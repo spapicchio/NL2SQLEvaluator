@@ -12,8 +12,9 @@ from typing import TypeAlias
 
 from func_timeout import func_timeout, FunctionTimedOut
 
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable, SQLCacheProtocol, \
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import SQLCacheProtocol, \
     DataToFetch
+from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError, TaskToBeExecuted
 from NL2SQLEvaluator.node_registry import register_node
 
@@ -36,7 +37,7 @@ class SQLiteDBExecutor:
             cache_db_file: str | None = None,
             allow_write: bool = False,
             *args, **kwargs
-    ) -> list[list[OutputTable | ExecutorError]]:
+    ) -> list[list[SQLOutputTable | ExecutorError]]:
         """Executes batches of SQL queries across multiple SQLite databases.
 
         Why: Provides a safe, isolated, and parallel way to run multiple SQL
@@ -74,18 +75,18 @@ class SQLiteDBExecutor:
 
         if len(tasks_mp) == 1:
             _, _, res = execute_fn_with_cache(*tasks_mp[0])
-            results: list[list[OutputTable | ExecutorError]] = [[ExecutorError()] * len(t.queries) for t in tasks]
+            results: list[list[SQLOutputTable | ExecutorError]] = [[ExecutorError()] * len(t.queries) for t in tasks]
             results[tasks_mp[0][0]][tasks_mp[0][1]] = res
             return results
 
         with mp.Pool(processes=num_cpus) as pool:
-            flat_results: list[tuple[int, int, OutputTable | ExecutorError]] = pool.starmap(
+            flat_results: list[tuple[int, int, SQLOutputTable | ExecutorError]] = pool.starmap(
                 execute_fn_with_cache,
                 tasks_mp
             )
 
         # Reassemble into rectangular [tasks][query_idx] result
-        results: list[list[OutputTable | ExecutorError]] = [[ExecutorError()] * len(t.queries) for t in tasks]
+        results: list[list[SQLOutputTable | ExecutorError]] = [[ExecutorError()] * len(t.queries) for t in tasks]
         for job_id, idx, value in flat_results:
             results[job_id][idx] = value
 
@@ -121,16 +122,16 @@ def _execute_single_query(
         *,
         cache_db: SQLCacheProtocol | None = None,
         cache_db_file: str | None = None,
-) -> tuple[int, int, OutputTable | ExecutorError]:
+) -> tuple[int, int, SQLOutputTable | ExecutorError]:
     """Internal worker function to execute a single SQL query."""
 
-    def _run() -> OutputTable | ExecutorError:
+    def _run() -> SQLOutputTable | ExecutorError:
         if cache_db and cache_db_file:
             try:
                 db_id = Path(db_file).stem
                 cached = cache_db.get_from_cache(
                     cache_db_file,
-                    data_to_fetch=[DataToFetch(db_id=db_id, query=query)]
+                    data_to_fetch=[DataToFetch(db_path=db_id, query=query)]
                 )
                 if not isinstance(cached, Exception):
                     return cached[0].result
@@ -152,14 +153,14 @@ def _execute_single_query(
                     cur.execute(query, params or {})
                     conn.commit()
                     elapsed = time.perf_counter() - start_time
-                    return OutputTable(rows=[([cur.rowcount])], executed_time=elapsed * 1.25)
+                    return SQLOutputTable(rows=[([cur.rowcount])], executed_time=elapsed * 1.25)
 
                 else:
                     cur.execute(query, params or {})
                     rows = cur.fetchall()
                     conn.rollback()
                     elapsed = time.perf_counter() - start_time
-                    return OutputTable(rows=rows, executed_time=elapsed * 1.10)
+                    return SQLOutputTable(rows=rows, executed_time=elapsed * 1.10)
 
             except Exception as e:
                 try:

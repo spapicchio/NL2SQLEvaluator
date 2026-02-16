@@ -1,6 +1,6 @@
 import pytest
 
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
+from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import EvaluateTask
 from NL2SQLEvaluator.evaluator_nodes.qatch_metrics import QATCHEvaluator
 
@@ -13,8 +13,8 @@ def executor() -> QATCHEvaluator:
 class TestTupleOrder:
     def _internal_run(self, tar, pred, executor):
         task = EvaluateTask(
-            predictions=[OutputTable(rows=pred[0][0])],
-            target=[OutputTable(rows=tar[0][0])]
+            predictions=[SQLOutputTable(rows=pred[0][0])],
+            target=[SQLOutputTable(rows=tar[0][0])]
         )
 
         result = executor.execute_metric(

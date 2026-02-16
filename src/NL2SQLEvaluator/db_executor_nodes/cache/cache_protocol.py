@@ -1,8 +1,15 @@
-import hashlib
-from typing import Self, Any, Iterator, Protocol
+"""Module for managing cache-related data structures and protocols."""
 
-import sqlglot
+import hashlib
+from typing import Self, Protocol
+
 from pydantic import BaseModel, model_validator
+
+from NL2SQLEvaluator.db_executor_nodes.cache.code_normalizer import (
+    QUERY_NORMALIZERS,
+    base_normalize_whitespace_and_case
+)
+from NL2SQLEvaluator.db_executor_nodes.output_table import GenericOutputTable
 
 
 class NotFoundInCacheError(Exception):
@@ -10,90 +17,71 @@ class NotFoundInCacheError(Exception):
     pass
 
 
-class OutputTable(BaseModel):
-    rows: list[tuple | list]
-    executed_time: float | None = None
-
-    @model_validator(mode='after')
-    def forbid_inner_lists(self) -> Self:
-        for i, row in enumerate(self.rows):
-            for j, val in enumerate(row):
-                if isinstance(val, list | tuple | set | dict):
-                    raise TypeError(
-                        f"rows[{i}][{j}] is a list, which is forbidden"
-                    )
-        return self
-
-    def __len__(self):
-        return len(self.rows)
-
-    def __call__(self, index: int | slice | None = None) -> Any:
-        """
-        Call to access rows:
-        - no argument -> return the full rows list
-        - int -> return the row at that index (supports negative indices)
-        - slice -> return a sublist of rows
-        """
-        if index is None:
-            return self.rows
-        if isinstance(index, (int, slice)):
-            return self.rows[index]
-        raise TypeError("index must be an int, slice, or None")
-
-    def __getitem__(self, item):
-        return self.rows[item]
-
-    def __iter__(self) -> Iterator[Any]:
-        return iter(self.rows)
-
-    def __contains__(self, item: Any) -> bool:
-        return item in self.rows
-
-    def compress(self) -> bytes:
-        """Compress the result to save space in cache."""
-        # Implement compression logic if needed
-        import pickle
-        return pickle.dumps(self)
-
-    def decompress(self) -> Self:
-        import pickle
-        return pickle.loads(self.rows[0][0]) if self.rows and self.rows[0] else self
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, OutputTable):
-            return self.rows == other.rows
-        return NotImplemented
-
-
-
 class DataToFetch(BaseModel):
-    db_id: str
+    """
+    Metadata for identifying a query in the cache.
+
+    Why: Ensures that queries differing only in whitespace or case are 
+    treated as hits by generating a deterministic hash key.
+
+    Example:
+        >>> fetch = DataToFetch(db_path="HR_DB", query="SELECT * FROM users", dialect="sqlite")
+        >>> print(fetch.hash_key)
+    """
+    db_path: str
     query: str
     dialect: str = "sqlite"
-    hash_key: Any = None
 
     @model_validator(mode='after')
-    def create_hash_key(self) -> Self:
-        try:
-            self.query = sqlglot.transpile(self.query, self.dialect, identity=True)[0]
-        except Exception:
-            ...  # keep original query if transpile fails
-        value = f"{self.db_id}|{self.query}"
-        self.hash_key = self.hash_key or hashlib.sha256(value.encode("utf-8")).hexdigest()
+    def normalize_query(self) -> Self:
+        """Normalizes the query string based on the SQL dialect."""
+        normalizer = QUERY_NORMALIZERS.get(
+            self.dialect.lower(),
+            base_normalize_whitespace_and_case
+        )
+        self.query = normalizer(self.query, self.dialect)
         return self
+
+    @property
+    def hash_key(self) -> str:
+        """Returns a SHA256 hash of the unique query identifiers."""
+        payload = f"{self.db_path}|{self.dialect.lower()}|{self.query}".encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
 
 
 class DataToCache(DataToFetch):
-    result: OutputTable
+    """Container for storing both the query metadata and its executed result."""
+    result: GenericOutputTable
 
 
 class SQLCacheProtocol(Protocol):
-    @staticmethod
-    def set_in_cache(db_file: str, data_to_cache: list[DataToCache]) -> None:
-        """Save a file with the given name and parameters."""
-        ...
+    """
+    Defines the interface for cache storage backends.
+    """
 
-    @staticmethod
-    def get_from_cache(db_file: str, data_to_fetch: list[DataToFetch]) -> list[DataToCache | NotFoundInCacheError]:
-        """Retrieve a file with the given name and parameters."""
-        ...
+    def set_in_cache(self, cache_path: str, data_to_cache: list[DataToCache]) -> None:
+        """
+        Persists a list of query results to the specified cache.
+
+        Args:
+            cache_path: The destination identifier (e.g., directory path or URI).
+            data_to_cache: The data objects to be stored.
+        """
+        pass
+
+    def get_from_cache(
+            self,
+            cache_path: str,
+            data_to_fetch: list[DataToFetch]
+    ) -> list[DataToCache | NotFoundInCacheError]:
+        """
+        Retrieves cached results for the requested queries.
+
+        Args:
+            cache_path: The source identifier for the cache.
+            data_to_fetch: Metadata for the queries to look up.
+
+        Returns:
+            A list where each element is either the cached result or an error object.
+        """
+        pass

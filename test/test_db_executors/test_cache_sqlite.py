@@ -2,8 +2,9 @@ import pytest
 
 from NL2SQLEvaluator.db_executor_nodes import SqliteCache, SQLiteDBExecutor
 from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecuteTask
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import NotFoundInCacheError, OutputTable, DataToFetch, \
+from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import NotFoundInCacheError, DataToFetch, \
     DataToCache
+from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
 
 
 @pytest.fixture
@@ -21,7 +22,7 @@ def cache_db(db_file) -> SqliteCache:
     return SqliteCache()
 
 
-def return_rows_in_cache(db_file: str) -> OutputTable:
+def return_rows_in_cache(db_file: str) -> SQLOutputTable:
     executor = SQLiteDBExecutor()
     task = ExecuteTask(
         db_files=[db_file],
@@ -36,10 +37,10 @@ def return_rows_in_cache(db_file: str) -> OutputTable:
 class TestSqliteCache:
     def test_insert_works(self, cache_db: SqliteCache, db_file):
         query = "SELECT * FROM users WHERE age > 30"
-        result = OutputTable(rows=[("Alice", 35), ("Bob", 40)])
+        result = SQLOutputTable(rows=[("Alice", 35), ("Bob", 40)])
         cache_db.set_in_cache(
             db_file,
-            data_to_cache=[DataToCache(db_id='test', query=query, result=result)],
+            data_to_cache=[DataToCache(db_path='test', query=query, result=result)],
         )
 
         rows = return_rows_in_cache(db_file).rows
@@ -50,35 +51,35 @@ class TestSqliteCache:
 
     def test_cache_and_retrieve(self, cache_db: SqliteCache, db_file):
         query = "SELECT * FROM users WHERE age > 30"
-        result = OutputTable(rows=[("Carol", 40)])
+        result = SQLOutputTable(rows=[("Carol", 40)])
         cache_db.set_in_cache(
             db_file,
-            data_to_cache=[DataToCache(db_id='test', query=query, result=result)],
+            data_to_cache=[DataToCache(db_path='test', query=query, result=result)],
         )
 
-        retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])[0]
+        retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])[0]
         assert retrieved_result == result
 
     def test_multiple_inserts(self, cache_db: SqliteCache, db_file):
         queries_and_results = [
-            ("SELECT * FROM users WHERE age > 30", OutputTable(rows=[("Dave", 45)])),
-            ("SELECT * FROM users WHERE age < 20", OutputTable(rows=[("Eve", 18)])),
+            ("SELECT * FROM users WHERE age > 30", SQLOutputTable(rows=[("Dave", 45)])),
+            ("SELECT * FROM users WHERE age < 20", SQLOutputTable(rows=[("Eve", 18)])),
         ]
 
         data_to_cache = [
-            DataToCache(db_id='test', query=query, result=result)
+            DataToCache(db_path='test', query=query, result=result)
             for query, result in queries_and_results
         ]
         cache_db.set_in_cache(db_file, data_to_cache=data_to_cache)
 
         for query, expected_result in queries_and_results:
-            retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])[
+            retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])[
                 0]
             assert retrieved_result == expected_result
 
     def test_cache_miss(self, cache_db: SqliteCache, db_file):
         query = "SELECT * FROM users WHERE age > 50"
-        retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])
+        retrieved_result = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])
         assert isinstance(retrieved_result[0], NotFoundInCacheError)
 
     def test_multiple_cache_misses(self, cache_db: SqliteCache, db_file):
@@ -86,7 +87,7 @@ class TestSqliteCache:
             "SELECT * FROM users WHERE age > 60",
             "SELECT * FROM users WHERE age < 10",
         ]
-        data_to_fetch = [DataToFetch(db_id='test', query=query) for query in queries]
+        data_to_fetch = [DataToFetch(db_path='test', query=query) for query in queries]
         retrieved_results = cache_db.get_from_cache(db_file, data_to_fetch=data_to_fetch)
 
         for result in retrieved_results:
@@ -95,17 +96,17 @@ class TestSqliteCache:
     def test_mixed_cache_hits_and_misses(self, cache_db: SqliteCache, db_file):
         # Insert one query into the cache
         hit_query = "SELECT * FROM users WHERE age > 30"
-        hit_result = OutputTable(rows=[("Frank", 55)])
+        hit_result = SQLOutputTable(rows=[("Frank", 55)])
         cache_db.set_in_cache(
             db_file,
-            data_to_cache=[DataToCache(db_id='test', query=hit_query, result=hit_result)],
+            data_to_cache=[DataToCache(db_path='test', query=hit_query, result=hit_result)],
         )
 
         # Prepare one hit and one miss
         miss_query = "SELECT * FROM users WHERE age < 10"
         data_to_fetch = [
-            DataToFetch(db_id='test', query=hit_query),
-            DataToFetch(db_id='test', query=miss_query),
+            DataToFetch(db_path='test', query=hit_query),
+            DataToFetch(db_path='test', query=miss_query),
         ]
 
         retrieved_results = cache_db.get_from_cache(db_file, data_to_fetch=data_to_fetch)
@@ -115,8 +116,8 @@ class TestSqliteCache:
 
     def test_duplicate_insert_ignored(self, cache_db: SqliteCache, db_file):
         query = "SELECT duplicate_test"
-        result = OutputTable(rows=[("Dup", 1)])
-        data = DataToCache(db_id='test', query=query, result=result)
+        result = SQLOutputTable(rows=[("Dup", 1)])
+        data = DataToCache(db_path='test', query=query, result=result)
 
         cache_db.set_in_cache(db_file, data_to_cache=[data])
         cache_db.set_in_cache(db_file, data_to_cache=[data])  # same item again
@@ -126,44 +127,44 @@ class TestSqliteCache:
 
     def test_empty_result_cached_and_retrieved(self, cache_db: SqliteCache, db_file):
         query = "SELECT empty_result"
-        empty_result = OutputTable(rows=[])
-        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_id='test', query=query, result=empty_result)])
+        empty_result = SQLOutputTable(rows=[])
+        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_path='test', query=query, result=empty_result)])
 
-        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])[0]
+        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])[0]
         assert retrieved == empty_result
 
     def test_large_result(self, cache_db: SqliteCache, db_file):
         query = "SELECT large_result"
         large_rows = [(f"name_{i}", i) for i in range(500)]
-        large_result = OutputTable(rows=large_rows)
-        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_id='test', query=query, result=large_result)])
+        large_result = SQLOutputTable(rows=large_rows)
+        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_path='test', query=query, result=large_result)])
 
-        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])[0]
+        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])[0]
         assert retrieved == large_result
 
     def test_retrieve_preserves_request_order(self, cache_db: SqliteCache, db_file):
         q1 = "SELECT order_test_1"
-        r1 = OutputTable(rows=[("One", 1)])
+        r1 = SQLOutputTable(rows=[("One", 1)])
         q2 = "SELECT order_test_2"
-        r2 = OutputTable(rows=[("Two", 2)])
+        r2 = SQLOutputTable(rows=[("Two", 2)])
 
         cache_db.set_in_cache(db_file, data_to_cache=[
-            DataToCache(db_id='test', query=q1, result=r1),
-            DataToCache(db_id='test', query=q2, result=r2),
+            DataToCache(db_path='test', query=q1, result=r1),
+            DataToCache(db_path='test', query=q2, result=r2),
         ])
 
         # Request in reverse order and ensure results preserve the request order
         fetched = cache_db.get_from_cache(db_file, data_to_fetch=[
-            DataToFetch(db_id='test', query=q2),
-            DataToFetch(db_id='test', query=q1),
+            DataToFetch(db_path='test', query=q2),
+            DataToFetch(db_path='test', query=q1),
         ])
         assert fetched[0] == r2
         assert fetched[1] == r1
 
     def test_query_with_special_characters(self, cache_db: SqliteCache, db_file):
         query = "SELECT * FROM users WHERE name = 'O''Reilly' AND note = 'emoji: 🚀\\nnew'"
-        result = OutputTable(rows=[("O'Reilly", "emoji: 🚀\nnew")])
-        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_id='test', query=query, result=result)])
+        result = SQLOutputTable(rows=[("O'Reilly", "emoji: 🚀\nnew")])
+        cache_db.set_in_cache(db_file, data_to_cache=[DataToCache(db_path='test', query=query, result=result)])
 
-        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_id='test', query=query)])[0]
+        retrieved = cache_db.get_from_cache(db_file, data_to_fetch=[DataToFetch(db_path='test', query=query)])[0]
         assert retrieved == result

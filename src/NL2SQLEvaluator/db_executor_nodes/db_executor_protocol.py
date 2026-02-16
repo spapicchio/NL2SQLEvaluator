@@ -42,7 +42,7 @@ class TaskToBeExecuted(BaseModel):
     @model_validator(mode='after')
     def broadcast_params(self) -> Self:
         """Ensures params match the number of queries."""
-        if self.params is None or isinstance(self.params, (dict, tuple)):
+        if self.params is None or isinstance(self.params, (dict, tuple)) or self.params == []:
             p_val = self.params or {}
             self.params = [p_val for _ in range(len(self.queries))]
 
@@ -140,7 +140,7 @@ def execute_queries_in_model_predictions(
     )
 
     # Reassemble results into the original input order
-    final_output = [[]] * len(db_files)
+    final_output = [None] * len(db_files)
     for task_idx, (db_path, data) in enumerate(storage_items):
         # batch_results is the long list of results for one specific database
         batch_results = all_results[task_idx]
