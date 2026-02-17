@@ -8,6 +8,8 @@ This package contains the code for executing queries over the database and possi
 |   │   ├── 📄 cache_protocol.py                     # Protocol defining the interface for caching query results
 |   │   ├── 📄 code_normalizer.py                    # Utility for normalizing code to ensure consistent caching
 |   │   └── 📄 sqlite_cache.py                       # Implementation of the cache protocol using SQLite
+│   ├── 📄 db_executor_input.py                      # Implementation of the base classes representing the input for executing a query
+│   ├── 📄 db_executor_output.py                     # Implementation of the base classes representing the output of a query execution
 │   ├── 📄 db_executor_protocol.py                   # Protocol defining the interface for executing database queries
 │   ├── 📄 sqlite_db_executor.py                     # Implementation of the database executor protocol using SQLite
 │   └── 📄 output_table.py                           # Implementaiton of the base classes representing the output of a query execution
@@ -17,9 +19,10 @@ This package contains the code for executing queries over the database and possi
 
 If you want to contribute adding a different database executor, you can follow these steps:
 
-1. define in the output table the output of the query execution, following the pydantic class `GenericOutExecutedCode`.
+1. define in the `db_executor_output.py`  the output of the query execution, following the pydantic class `GenericOutExecutedCode`.
 2. create a new python module that implements the `DBExecutorProtocol` defined in `db_executor_protocol.py`
-3. create test to cover the new implementation of the database executor protocol. You can find examples of tests in `test_db_executor_sqlite.py`.
+3. create tests in `test/test_db_executors` to cover the new implementation of the database executor protocol. You can find examples of tests in `test_db_executor_sqlite.py`.
+4. Run all the tests to ensure that your implementation is working correctly and does not break any existing functionality.
 
 Please note that the implementation of `DBExecutorProtocol.execute_queries` must be thread and process safe, 
 as it may be called concurrently from multiple threads or processes. 
