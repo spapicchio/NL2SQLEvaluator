@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import DataToFetch, DataToCache
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
 
 
 # Mocking a result table structure for DataToCache
@@ -43,10 +44,9 @@ def test_hash_key_is_read_only():
     """
     fetch = DataToFetch(db_path="test", query="SELECT 1")
 
-    # Attempting to set hash_key should raise an AttributeError since it's a @property
-    with pytest.raises(AttributeError):
-        fetch.hash_key = "manual_hash"
-
+    # Attempting to set hash_key should raise ValidationError since it is frozen
+    with pytest.raises(ValidationError):
+        fetch.hash_key = "manual_hash"  # pyrefly: ignore
 
 
 def test_invalid_input_types():
@@ -55,4 +55,9 @@ def test_invalid_input_types():
     """
     with pytest.raises(ValidationError):
         # db_id should be a string
-        DataToFetch(db_path=123, query="SELECT 1")
+        DataToFetch(db_path=123, query="SELECT 1")  # pyrefly: ignore
+
+
+def test_generic_for_data_to_cache():
+    cache_item = DataToCache[SQLExecutorOutput](db_path="test", query="SELECT 1", result=SQLExecutorOutput(rows=[]))
+    assert isinstance(cache_item.result, SQLExecutorOutput)

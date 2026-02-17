@@ -1,15 +1,21 @@
-"""Module for managing cache-related data structures and protocols."""
+"""
+This module provides data structures for Code query caching.
 
+It handles normalization of queries across different dialects to ensure
+consistent cache key generation.
+"""
 import hashlib
-from typing import Self, Protocol
+from typing import Protocol, Generic
+from typing import TypeVar
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 from NL2SQLEvaluator.db_executor_nodes.cache.code_normalizer import (
     QUERY_NORMALIZERS,
     base_normalize_whitespace_and_case
 )
-from NL2SQLEvaluator.db_executor_nodes.output_table import GenericOutputTable
+
+T = TypeVar("T")
 
 
 class NotFoundInCacheError(Exception):
@@ -18,70 +24,87 @@ class NotFoundInCacheError(Exception):
 
 
 class DataToFetch(BaseModel):
-    """
-    Metadata for identifying a query in the cache.
+    """Metadata for identifying and hashing a SQL query in the cache.
 
-    Why: Ensures that queries differing only in whitespace or case are 
-    treated as hits by generating a deterministic hash key.
+    This class normalizes SQL input and generates a unique hash key used
+    for cache lookups. It ensures that queries differing only by case or
+    whitespace are treated as identical.
+
+    Args:
+        db_path: The filesystem path or identifier for the database.
+        query: The raw SQL query string.
+        dialect: The SQL dialect (e.g., 'sqlite', 'postgres'). Defaults to 'sqlite'.
+
+    Attributes:
+        hash_key: A deterministic SHA256 hash of the normalized inputs.
 
     Example:
-        >>> fetch = DataToFetch(db_path="HR_DB", query="SELECT * FROM users", dialect="sqlite")
-        >>> print(fetch.hash_key)
+        >>> data = DataToFetch(db_path="HR_DB", query="SELECT * FROM table", dialect="sqlite")
+        >>> print(data.hash_key)
+        'a1b2c3...'
     """
+
+    model_config = ConfigDict(frozen=True)
+
     db_path: str
     query: str
     dialect: str = "sqlite"
+    hash_key: str = Field(default="", init=False, repr=False)
 
     @model_validator(mode='after')
-    def normalize_query(self) -> Self:
-        """Normalizes the query string based on the SQL dialect."""
+    def normalize_and_hash(self) -> "DataToFetch":
+        """Normalizes data and computes hash after Pydantic type validation.
+        Why: By using 'after', we guarantee that inputs are already strings.
+        We use object.__setattr__ to modify the fields since the model is frozen.
+        Returns:
+            The instance with normalized fields and a populated hash_key.
+        """
+        # Normalize strings
+        d_lower = self.dialect.lower()
+        p_lower = self.db_path.lower()
+
         normalizer = QUERY_NORMALIZERS.get(
-            self.dialect.lower(),
+            d_lower,
             base_normalize_whitespace_and_case
         )
-        self.query = normalizer(self.query, self.dialect)
+        q_norm = normalizer(self.query, d_lower)
+
+        # Update fields using __setattr__ to bypass frozen=True
+        object.__setattr__(self, "dialect", d_lower)
+        object.__setattr__(self, "db_path", p_lower)
+        object.__setattr__(self, "query", q_norm)
+
+        # Compute and set hash_key
+        payload = f"{p_lower}|{d_lower}|{q_norm}".encode("utf-8")
+        h = hashlib.sha256(payload).hexdigest()
+        object.__setattr__(self, "hash_key", h)
         return self
 
-    @property
-    def hash_key(self) -> str:
-        """Returns a SHA256 hash of the unique query identifiers."""
-        payload = f"{self.db_path}|{self.dialect.lower()}|{self.query}".encode("utf-8")
-        return hashlib.sha256(payload).hexdigest()
 
+class DataToCache(DataToFetch, Generic[T]):
+    """Container for a query's metadata and its generic execution result.
 
-class DataToCache(DataToFetch):
-    """Container for storing both the query metadata and its executed result."""
-    result: GenericOutputTable
-
-
-class SQLCacheProtocol(Protocol):
+    Why: Provides a type-safe wrapper for any result type (DataFrames, Tables).
+    Example:
+        >>> item = DataToCache[int](db_path="db", query="SELECT 1", result=1)
     """
-    Defines the interface for cache storage backends.
+    result: T
+
+
+class SQLCacheProtocol(Protocol[T]):
+    """Interface for cache backends supporting type-safe retrieval.
+
+    Why: Decouples storage logic (SQLite, Redis) from the execution pipeline.
     """
 
-    def set_in_cache(self, cache_path: str, data_to_cache: list[DataToCache]) -> None:
-        """
-        Persists a list of query results to the specified cache.
-
-        Args:
-            cache_path: The destination identifier (e.g., directory path or URI).
-            data_to_cache: The data objects to be stored.
-        """
-        pass
+    def set_in_cache(self, cache_path: str, data_to_cache: list[DataToCache[T]]) -> None:
+        """Persists a list of results to the cache backend."""
+        ...
 
     def get_from_cache(
             self,
             cache_path: str,
             data_to_fetch: list[DataToFetch]
-    ) -> list[DataToCache | NotFoundInCacheError]:
-        """
-        Retrieves cached results for the requested queries.
-
-        Args:
-            cache_path: The source identifier for the cache.
-            data_to_fetch: Metadata for the queries to look up.
-
-        Returns:
-            A list where each element is either the cached result or an error object.
-        """
-        pass
+    ) -> list[DataToCache[T] | NotFoundInCacheError]:
+        """Retrieves results, returning DataToCache[T] for hits or Error for misses."""
+        ...

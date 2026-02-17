@@ -10,10 +10,14 @@ from typing import Self, Any, Optional, override
 
 from pydantic import BaseModel, model_validator, ConfigDict
 
+from NL2SQLEvaluator.logger import get_logger
+
+logger = get_logger(__name__)
+
 
 # Assume logger is imported correctly as per your snippet
 
-class GenericOutputTable(BaseModel, ABC):
+class GenericExecutorOutput(BaseModel, ABC):
     """Abstract base class representing a standardized database result set.
 
     This class provides a consistent interface for caching and evaluating results
@@ -31,7 +35,7 @@ class GenericOutputTable(BaseModel, ABC):
     execution_time: Optional[float] = None
 
     @abstractmethod
-    def is_equivalent_to(self, other: 'GenericOutputTable', *args, **kwargs) -> bool:
+    def is_equivalent_to(self, other_out_executed_code: 'GenericExecutorOutput', *args, **kwargs) -> bool:
         """Compare two result sets based on language-specific rules."""
         pass
 
@@ -40,8 +44,9 @@ class GenericOutputTable(BaseModel, ABC):
         """Compress the result to save space in cache."""
         pass
 
+    @staticmethod
     @abstractmethod
-    def decompress(self, compressed_data: bytes, *args, **kwargs) -> Self:
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'GenericExecutorOutput':
         """Decompress the result from the internal compressed_data buffer."""
         pass
 
@@ -59,36 +64,19 @@ class GenericOutputTable(BaseModel, ABC):
     def __getitem__(self, item):
         return self.rows[item]
 
-    def __len__(self):
-        return len(self.rows)
-
-    def __call__(self, index: int | slice | None = None) -> Any:
-        """Access rows by index or slice. Returns all rows if index is None."""
-        if index is None:
-            return self.rows
-        if isinstance(index, (int, slice)):
-            return self.rows[index]
-        raise TypeError("index must be an int, slice, or None")
-
-    def __getitem__(self, item):
-        return self.rows[item]
-
-    def __contains__(self, item: Any) -> bool:
-        return item in self.rows
-
     def __contains__(self, item: Any) -> bool:
         return item in self.rows
 
 
-class SQLOutputTable(GenericOutputTable):
+class SQLExecutorOutput(GenericExecutorOutput):
     """Wraps SQL query results to enable deterministic comparisons and storage.
 
     SQL results are often unordered by default. This class allows comparing
     two result sets for equality by treating them as multisets.
 
     Example:
-        >>> table = SQLOutputTable(columns=["id"], rows=[(1,), (2,)])
-        >>> table.is_equivalent_to(SQLOutputTable(columns=["id"], rows=[(2,), (1,)]))
+        >>> table = SQLExecutorOutput(columns=["id"], rows=[(1,), (2,)])
+        >>> table.is_equivalent_to(SQLExecutorOutput(columns=["id"], rows=[(2,), (1,)]))
         True
     """
 
@@ -108,38 +96,43 @@ class SQLOutputTable(GenericOutputTable):
         return self
 
     @override
-    def is_equivalent_to(self, other: 'GenericOutputTable', *args, **kwargs) -> bool:
-        """Compares two SQL tables for data equivalence.
+    def is_equivalent_to(self, other_out_executed_code: 'GenericExecutorOutput', *args, **kwargs) -> bool:
+        """Wraps SQL query results to enable deterministic comparisons and storage.
 
-        Args:
-            other: The table to compare against.
-            is_row_order_important: Whether the sequence of rows matters.
-                Defaults to True.
-            **kwargs: For interface compatibility.
+            SQL results are often unordered unless an ORDER BY clause is present. This
+            class allows comparing two result sets for equality by treating them as
+            multisets (bags), ensuring that row order doesn't break tests unless specified.
 
-        Returns:
-            bool: True if tables contain equivalent data.
-        """
+            Example:
+                >>> table_a = SQLExecutorOutput(rows=[(1, 'Alice'), (2, 'Bob')])
+                >>> table_b = SQLExecutorOutput(rows=[(2, 'Bob'), (1, 'Alice')])
+                >>> table_a.is_equivalent_to(table_b, is_row_order_important=False)
+                True
+
+            Note:
+                is_equivalente is also ordering the attribute columns.
+                Therefore, it must be used only to compare the execution of SQL code rather than two tables in general.
+            """
         if 'is_row_order_important' not in kwargs:
-            raise ValueError(
-                "Missing required argument: `is_row_order_important` used to determine if row order matters for comparison.")
-
-        is_row_order_important = kwargs['is_row_order_important']
-
-        if not isinstance(other, SQLOutputTable):
-            return False
-
-        if len(self.rows) != len(other.rows):
-            return False
-
-        if is_row_order_important:
-            return all(
-                self.sort_with_universal_key(r1) == self.sort_with_universal_key(r2)
-                for r1, r2 in zip(self.rows, other.rows)
+            logger.debug(
+                "Missing required argument: `is_row_order_important`"
+                " used to determine if row order matters for comparison. Default to FALSE."
             )
 
-        sorted_rows = map(self.sort_with_universal_key, self.rows)
-        sorted_other_rows = map(self.sort_with_universal_key, other.rows)
+        is_row_order_important = kwargs.get('is_row_order_important', False)
+
+        if not isinstance(other_out_executed_code, SQLExecutorOutput):
+            logger.warning('Comparison between different output table types is not supported. Returning False.')
+            return False
+
+        if len(self.rows) != len(other_out_executed_code.rows):
+            return False
+        sorted_rows = list(map(self.sort_with_universal_key, self.rows))
+        sorted_other_rows = list(map(self.sort_with_universal_key, other_out_executed_code.rows))
+
+        if is_row_order_important:
+            return sorted_rows == sorted_other_rows
+
         return Counter(sorted_rows) == Counter(sorted_other_rows)
 
     @override
@@ -154,8 +147,9 @@ class SQLOutputTable(GenericOutputTable):
         state = self.model_dump()
         return zlib.compress(pickle.dumps(state))
 
+    @staticmethod
     @override
-    def decompress(self, compressed_data: bytes, *args, **kwargs) -> Self:
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'SQLExecutorOutput':
         """Reconstructs the instance from a compressed byte string.
 
         Args:
@@ -168,7 +162,7 @@ class SQLOutputTable(GenericOutputTable):
         import zlib
         import pickle
         state = pickle.loads(zlib.decompress(compressed_data))
-        return self.__class__(**state)
+        return SQLExecutorOutput(**state)
 
     @staticmethod
     def universal_sort_key(x: Any) -> tuple[int, Any]:
@@ -197,4 +191,4 @@ class SQLOutputTable(GenericOutputTable):
         Returns:
             tuple: The sorted row.
         """
-        return tuple(sorted(arr, key=SQLOutputTable.universal_sort_key))
+        return tuple(sorted(arr, key=SQLExecutorOutput.universal_sort_key))

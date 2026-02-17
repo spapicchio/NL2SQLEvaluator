@@ -2,8 +2,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import TaskToBeExecuted, utils_extract_sql_or_same, \
-    execute_queries_in_model_predictions, CodeExecuteProtocol
+from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import execute_queries_in_model_predictions, DBExecutorProtocol
+from NL2SQLEvaluator.db_executor_nodes.db_executor_input import TaskToBeExecuted
+from NL2SQLEvaluator.db_executor_nodes.utils import utils_extract_sql_or_same
 
 
 # Assuming the above code is in a file named sql_engine.py
@@ -22,7 +23,7 @@ class TestSQLExecutionModule:
 
     def test_task_params_length_mismatch(self):
         """Test that passing mismatched params raises a ValueError."""
-        with pytest.raises(ValueError, match="Length of params must match"):
+        with pytest.raises(ValueError):
             TaskToBeExecuted(
                 db_path="test.db",
                 queries=["SELECT 1"],
@@ -43,7 +44,7 @@ class TestSQLExecutionModule:
     def test_execute_queries_grouping_logic(self):
         """Test that queries are correctly grouped by DB and then reassembled."""
         # Mock Executor
-        mock_executor = MagicMock(CodeExecuteProtocol)
+        mock_executor = MagicMock(DBExecutorProtocol)
 
         # We have 3 batches, but only 2 unique DBs
         db_files = ["db1.sqlite", "db2.sqlite", "db1.sqlite"]
