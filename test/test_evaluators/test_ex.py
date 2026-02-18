@@ -1,8 +1,11 @@
+import math
+from typing import List, Tuple
+
 import pytest
 
-from NL2SQLEvaluator.db_executor_nodes.output_table import SQLOutputTable
-from NL2SQLEvaluator.evaluator_nodes import EXEvaluator
-from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import EvaluateTask
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
+from NL2SQLEvaluator.evaluator_nodes.evaluator_input import EvalText2SQLTask
+from NL2SQLEvaluator.evaluator_nodes.text2sql_evaluators import EXEvaluator
 
 
 @pytest.fixture
@@ -10,114 +13,86 @@ def executor() -> EXEvaluator:
     return EXEvaluator()
 
 
-class TestEX:
-    def _internal_run(self, tar, pred, executor):
-        task = EvaluateTask(
-            predictions=[SQLOutputTable(rows=pred[0][0])],
-            target=[SQLOutputTable(rows=tar[0][0])]
+class TestEXCardinality:
+    def _run_eval(self, executor: EXEvaluator, tar_rows: List[Tuple], pred_rows: List[Tuple]) -> float:
+        """Helper to wrap rows into a Task and execute the metric.
+
+        Args:
+            executor: The evaluator instance.
+            tar_rows: Ground truth rows.
+            pred_rows: Model predicted rows.
+
+        Returns:
+            The score (usually 0.0 or 1.0).
+        """
+        task = EvalText2SQLTask(
+            target=SQLExecutorOutput(rows=tar_rows),
+            predictions=[SQLExecutorOutput(rows=pred_rows)]
         )
+        # Assuming execute_metric returns a list of floats for the provided tasks
+        results = executor.execute_metric(tasks=[task])
+        return results[0]
 
-        result = executor.execute_metric(
-            tasks=[task]
-        )
-        return result
+    @pytest.mark.parametrize("test_id, tar, pred, expected", [
+        # Base evaluations:
+        ("exact_match", [('a', 'b'), ('c', 'd')], [('a', 'b'), ('c', 'd')], 1.0),
+        ("different_values", [('a', 'b')], [('c', 'd')], 0.0),
+        ("null_equivalence", [('a', None)], [('a', None)], 1.0),
+        ("nan_equivalence", [('a', math.nan)], [('a', math.nan)], 1.0),
+        ("floating_point_precision", [('a', 1)], [('a', 1.0000000001)], 0.0),
+        ("empty_vs_non_empty", [], [('a',)], 0.0),
+        ("non_empty_vs_empty", [('a',)], [], 0.0),
+        ("both_empty", [], [], 1.0),
+        ("nan_vs_string_nan", [(math.nan,)], [('NaN',)], 0.0),
+        # Improved over BIRD-Specific locgi
+        # This should fail only if the ORDER-BY is not specified in the SQL query
+        ("reordered_rows", [('a', 'b'), ('c', 'd')], [('c', 'd'), ('a', 'b')], 1.0),
+        # The metric is column invariant, so this should passes
+        ("different_column_projection", [('a', 'b')], [('b', 'a')], 1.0),
+        # BirdEX is not a multiset metric, so duplicate rows in the target should not cause a mismatch
+        ("multiset_collapse_bird_ex", [('a', 'b'), ('a', 'b')], [('a', 'b')], 0.0),
+        # custom ceck column order invariant and row order invariant (because ORDER-BY not specified)
+        (
+                "custom_example",
+                [
+                    ('Antone', 471, None),
+                    ('Brenden', 669),
+                    ('Camila', 276),
+                    ('Edison', 762),
+                    ('Felipa', None, 811),
+                    ('Keshawn', 984),
+                    ('Vanessa', 435),
+                ],
+                [
+                    (276, 'Camila'),
+                    (435, 'Vanessa'),
+                    (471, None, 'Antone'),
+                    (669, 'Brenden'),
+                    (762, 'Edison'),
+                    (None, 811, 'Felipa'),
+                    (984, 'Keshawn'),
+                ],
+                1.0),
+    ])
+    def test_ex_logic(self, executor, test_id, tar, pred, expected):
+        """Validates various row comparison scenarios.
 
-    def test_equal(self, executor):
-        multiple_tasks_tar = [('a', 'b'), ('c', 'd')]
-        multiple_tasks_preds = [('a', 'b'), ('c', 'd')]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
+        The 'multiset_collapse' test specifically checks BirdEX's behavior
+        regarding duplicate rows in the target vs prediction.
+        """
+        score = self._run_eval(executor, tar, pred)
+        assert score == expected, f"Failed case '{test_id}': expected {expected}, got {score}"
 
-    def test_different(self, executor):
-        multiple_tasks_tar = [('a', 'b'), ('c', 'd')]
-        multiple_tasks_preds = [('c', 'd')]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
+    def test_bulk_processing(self, executor):
+        """Verifies that the evaluator handles multiple tasks in one call.
 
-    def test_equal_but_different_projection(self, executor):
-        multiple_tasks_tar = [('a', 'b'), ('c', 'd')]
-        multiple_tasks_preds = [('b', 'a'), ('d', 'c')]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_equal_but_different_tuple_order(self, executor):
-        multiple_tasks_tar = [('a', 'b'), ('c', 'd')]
-        multiple_tasks_preds = [('c', 'd'), ('a', 'b')]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_null_values(self, executor):
-        multiple_tasks_tar = [('a', None), ('c', 'd')]
-        multiple_tasks_preds = [('c', 'd'), ('a', None)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_null_math_none(self, executor):
-        import math
-        multiple_tasks_tar = [('a', math.nan), ('c', 'd')]
-        multiple_tasks_preds = [('c', 'd'), ('a', math.nan)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_mixed_types(self, executor):
-        multiple_tasks_tar = [('a', 1), ('c', 'd')]
-        multiple_tasks_preds = [('c', 'd'), ('a', 1.0000000001)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
-
-    def test_empty(self, executor):
-        multiple_tasks_tar = []
-        multiple_tasks_preds = [('c', 'd'), ('a', 1.0000000001)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
-        multiple_tasks_tar = []
-        multiple_tasks_preds = []
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_empty_lists(self, executor):
-        multiple_tasks_tar = []
-        multiple_tasks_preds = []
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
-
-    def test_empty_vs_non_empty(self, executor):
-        multiple_tasks_tar = []
-        multiple_tasks_preds = [('a',)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
-
-    def test_nan_and_string_mismatch(self, executor):
-        import math
-        multiple_tasks_tar = [(math.nan,)]
-        multiple_tasks_preds = [('NaN',)]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
-
-    def test_bird_ex_no_distinct(self, executor):
-        multiple_tasks_tar = [('a', 'b'), ('a', 'b')]
-        multiple_tasks_preds = [('a', 'b')]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 0.0
-
-    def test_ex_custom_case(self, executor):
-        multiple_tasks_tar = [
-            ('Antone', 471),
-            ('Brenden', 669),
-            ('Camila', 276),
-            ('Edison', 762),
-            ('Felipa', 811),
-            ('Keshawn', 984),
-            ('Vanessa', 435),
+        Why: Ensures batch processing doesn't leak state between tasks.
+        """
+        tasks = [
+            EvalText2SQLTask(target=SQLExecutorOutput(rows=[(1,)]), predictions=[SQLExecutorOutput(rows=[(1,)])]),
+            EvalText2SQLTask(target=SQLExecutorOutput(rows=[(1,)]), predictions=[SQLExecutorOutput(rows=[(2,)])]),
+            EvalText2SQLTask(target=SQLExecutorOutput(rows=[(1,)]), predictions=[SQLExecutorOutput(rows=[(2,)])]),
+            EvalText2SQLTask(target=SQLExecutorOutput(rows=[(1,)]), predictions=[SQLExecutorOutput(rows=[(2,)])]),
         ]
-        multiple_tasks_preds = [
-            (276, 'Camila'),
-            (435, 'Vanessa'),
-            (471, 'Antone'),
-            (669, 'Brenden'),
-            (762, 'Edison'),
-            (811, 'Felipa'),
-            (984, 'Keshawn'),
-        ]
-        result = self._internal_run([[multiple_tasks_tar]], [[multiple_tasks_preds]], executor)
-        assert result[0] == 1.0
+        results = executor.execute_metric(tasks=tasks)
+        assert results == [1.0, 0.0, 0.0, 0.0], f"Expected [1.0, 0.0, 0.0, 0.0], got {results}"

@@ -23,7 +23,8 @@ from typing import Protocol, Any, runtime_checkable
 from typing import TypeVar
 
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import SQLCacheProtocol
-from NL2SQLEvaluator.db_executor_nodes.db_executor_input import ExecutorError, TaskToBeExecuted
+from NL2SQLEvaluator.db_executor_nodes.db_executor_input import TaskToBeExecuted
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import ExecutorError
 
 T = TypeVar("T")
 

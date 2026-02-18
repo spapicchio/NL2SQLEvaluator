@@ -15,7 +15,10 @@ from NL2SQLEvaluator.logger import get_logger
 logger = get_logger(__name__)
 
 
-# Assume logger is imported correctly as per your snippet
+class ExecutorError(Exception):
+    """Raised when a database execution fails or times out."""
+    pass
+
 
 class GenericExecutorOutput(BaseModel, ABC):
     """Abstract base class representing a standardized database result set.
@@ -31,7 +34,6 @@ class GenericExecutorOutput(BaseModel, ABC):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     rows: list[tuple[Any, ...]]
-    columns: list[str] | None = None
     execution_time: Optional[float] = None
 
     @abstractmethod

@@ -1,20 +1,17 @@
 from typing import Protocol
 
-from pydantic import BaseModel
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import GenericExecutorOutput
+from NL2SQLEvaluator.evaluator_nodes.evaluator_input import BaseEvalTask, EvaluationType
+from NL2SQLEvaluator.evaluator_nodes.factory_evaluator import FactoryTaskEvaluator
 
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
-
-
-class EvaluateTask(BaseModel):
-    predictions: list[OutputTable]
-    target: list[OutputTable]
+TargetType = int | GenericExecutorOutput | list[GenericExecutorOutput]
+PredType = str | list[GenericExecutorOutput]
 
 
 class EvaluatorProtocol(Protocol):
     def execute_metric(
             self,
-            tasks: list[EvaluateTask],
+            tasks: list[BaseEvalTask],
             *args,
             **kwargs
     ) -> list[float]:
@@ -27,8 +24,9 @@ class EvaluatorProtocol(Protocol):
 
 def evaluate_target_and_pred(
         evaluator: EvaluatorProtocol,
-        multiple_tasks_preds: list[list[OutputTable | ExecutorError]],
-        multiple_tasks_tars: list[list[OutputTable | ExecutorError]],
+        targets: list[TargetType],
+        predictions: list[PredType],
+        task_type: EvaluationType,
         *args,
         **kwargs
 ) -> list[float]:
@@ -36,15 +34,12 @@ def evaluate_target_and_pred(
     Evaluate a single pair of predictions and targets using the provided evaluator.
     """
     tasks = [
-        EvaluateTask(
-            predictions=[pred for pred in preds if isinstance(pred, OutputTable)],
-            target=[tar for tar in tars if isinstance(tar, OutputTable)]
+        FactoryTaskEvaluator.create(
+            task_type=task_type,
+            target=target,
+            predictions=prediction
         )
-        for preds, tars in zip(multiple_tasks_preds, multiple_tasks_tars)
+        for target, prediction in zip(targets, predictions)
     ]
-    scores = evaluator.execute_metric(
-        tasks=tasks,
-        *args,
-        **kwargs
-    )
+    scores = evaluator.execute_metric(tasks, *args, **kwargs)
     return scores

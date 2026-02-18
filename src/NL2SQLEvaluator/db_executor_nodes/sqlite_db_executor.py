@@ -15,8 +15,8 @@ from func_timeout import func_timeout, FunctionTimedOut
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import (
     SQLCacheProtocol, DataToFetch, NotFoundInCacheError
 )
-from NL2SQLEvaluator.db_executor_nodes.db_executor_input import ExecutorError, TaskToBeExecuted
-from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
+from NL2SQLEvaluator.db_executor_nodes.db_executor_input import TaskToBeExecuted
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput, ExecutorError
 from NL2SQLEvaluator.node_registry import register_node
 
 

@@ -5,8 +5,7 @@ It handles normalization of queries across different dialects to ensure
 consistent cache key generation.
 """
 import hashlib
-from typing import Protocol, Generic
-from typing import TypeVar
+from typing import Protocol, Generic, TypeVar
 
 from pydantic import BaseModel, Field, ConfigDict, model_validator
 

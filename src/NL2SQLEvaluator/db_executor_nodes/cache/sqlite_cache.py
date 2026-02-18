@@ -7,8 +7,8 @@ SQLOutputTable objects based on a unique hash of the query and database context.
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import (
     NotFoundInCacheError, DataToFetch, DataToCache
 )
-from NL2SQLEvaluator.db_executor_nodes.db_executor_input import ExecutorError, TaskToBeExecuted
-from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
+from NL2SQLEvaluator.db_executor_nodes.db_executor_input import TaskToBeExecuted
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput, ExecutorError
 from NL2SQLEvaluator.db_executor_nodes.sqlite_db_executor import SQLiteDBExecutor
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node

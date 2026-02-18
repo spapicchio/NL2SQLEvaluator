@@ -3,11 +3,6 @@ from typing import Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class ExecutorError(Exception):
-    """Raised when a database execution fails or times out."""
-    pass
-
-
 class TaskToBeExecuted(BaseModel):
     """Represents a set of queries to be executed with strictly list-based settings.
 
