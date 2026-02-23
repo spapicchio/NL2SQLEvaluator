@@ -5,14 +5,14 @@ from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import DataToFetch, 
 from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
 
 
-# Mocking a result table structure for DataToCache
-class MockOutputTable:
-    pass
-
-
 @pytest.mark.parametrize("query_a, query_b, dialect", [
     ("SELECT * FROM users", "  select * FROM  users  ", "sqlite"),
     ("MATCH (n) RETURN n", "match (n) return n", "cypher"),
+    ("MATCH (n) RETURN n", "  MATCH  (n)  RETURN  n  ", "neo4j"),
+    ("MATCH (n:Person) WHERE n.name = 'Alice' RETURN n", "match (n:person) where n.name = 'Alice' return n", "cypher"),
+    ("SELECT ?s WHERE { ?s ?p ?o }", "  select  ?s  where  { ?s ?p ?o }  ", "sparql"),
+    ("PREFIX ex: <http://example.org/> SELECT ?s WHERE { ?s ex:name ?o }",
+     "prefix ex: <http://example.org/> select ?s where { ?s ex:name ?o }", "sparql"),
 ])
 def test_normalization_consistency(query_a: str, query_b: str, dialect: str):
     """
@@ -61,3 +61,30 @@ def test_invalid_input_types():
 def test_generic_for_data_to_cache():
     cache_item = DataToCache[SQLExecutorOutput](db_path="test", query="SELECT 1", result=SQLExecutorOutput(rows=[]))
     assert isinstance(cache_item.result, SQLExecutorOutput)
+
+
+def test_cypher_normalizer_preserves_string_literals():
+    """Cypher string literals inside quotes should be preserved."""
+    from NL2SQLEvaluator.db_executor_nodes.cache.code_normalizer import normalize_cypher
+    query = "MATCH (n) WHERE n.name = 'RETURN' RETURN n"
+    normalized = normalize_cypher(query)
+    # 'RETURN' inside quotes should be preserved, keywords lowered
+    assert "'RETURN'" in normalized
+    assert normalized.startswith("match")
+
+
+def test_sparql_normalizer_preserves_uris():
+    """SPARQL URIs inside angle brackets should be preserved."""
+    from NL2SQLEvaluator.db_executor_nodes.cache.code_normalizer import normalize_sparql
+    query = "SELECT ?s WHERE { ?s <http://EXAMPLE.ORG/SELECT> ?o }"
+    normalized = normalize_sparql(query)
+    # URI should be preserved as-is
+    assert "<http://EXAMPLE.ORG/SELECT>" in normalized
+    assert normalized.startswith("select")
+
+
+def test_neo4j_dialect_uses_cypher_normalizer():
+    """The 'neo4j' dialect key should use the cypher normalizer."""
+    fetch_a = DataToFetch(db_path="db_1", query="MATCH (n) RETURN n", dialect="neo4j")
+    fetch_b = DataToFetch(db_path="db_1", query="match (n) return n", dialect="cypher")
+    assert fetch_a.query == fetch_b.query

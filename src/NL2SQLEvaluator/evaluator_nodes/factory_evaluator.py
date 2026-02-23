@@ -6,6 +6,7 @@ from NL2SQLEvaluator.evaluator_nodes.evaluator_input import (
     EvalAmbigText2SQLTask,
     EvalUnansText2SQLTask,
     EvalText2CypherTask,
+    EvalText2SparqlTask,
     BaseEvalTask
 )
 
@@ -29,6 +30,7 @@ class FactoryTaskEvaluator:
         EvaluationType.AMBIGTEXT2SQL: EvalAmbigText2SQLTask,
         EvaluationType.UNANSTEXT2SQL: EvalUnansText2SQLTask,
         EvaluationType.TEXT2CYPHER: EvalText2CypherTask,
+        EvaluationType.TEXT2SPARQL: EvalText2SparqlTask,
     }
 
     @classmethod

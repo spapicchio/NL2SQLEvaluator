@@ -3,9 +3,9 @@ from pydantic import BaseModel, model_validator, ConfigDict
 from typing_extensions import Self
 
 from NL2SQLEvaluator.config import ScriptArgs, DatasetArgs, ModelArgs, PipelineArgs
-from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
-from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import OutputTable
-from NL2SQLEvaluator.db_executor_nodes.db_executor_protocol import ExecutorError
+from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatTurn
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import GenericExecutorOutput, ExecutorError
+from NL2SQLEvaluator.evaluator_nodes.evaluator_input import EvaluationType
 from NL2SQLEvaluator.evaluator_nodes.evaluator_protocol import evaluate_target_and_pred
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import get_node_from_registry
@@ -17,9 +17,9 @@ class PipelineTask(BaseModel):
     db_file: str
     target_sql: list[str]
     predictions: list[str] | None = None
-    input_seq: ChatMessageHF | None = None
-    executed_tar_sqls: list[OutputTable | ExecutorError] | None = None
-    executed_pred_sqls: list[OutputTable | ExecutorError] | None = None
+    input_seq: list[ChatTurn] | None = None
+    executed_tar_sqls: list[GenericExecutorOutput | ExecutorError] | None = None
+    executed_pred_sqls: list[GenericExecutorOutput | ExecutorError] | None = None
     score: float | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -73,7 +73,8 @@ def run_pipeline(pipeline_tasks=list[PipelineTask],
     data_with_executed_sqls = _execute_sqls(data_with_predictions, db_executor, cache_db,
                                             script_args.cache_db_file_path,
                                             script_args.execution_timeout)
-    return _evaluate(data_with_executed_sqls, evaluator)
+    task_type = EvaluationType(pipeline_args.evaluation_type)
+    return _evaluate(data_with_executed_sqls, evaluator, task_type)
 
 
 def _get_predictions(pipeline_tasks: list[PipelineTask], predictor, model_args: ModelArgs) -> list[PipelineTask]:
@@ -100,11 +101,11 @@ def _execute_sqls(pipeline_tasks: list[PipelineTask], db_executor, cache_db, cac
     db_files = [task.db_file for task in pipeline_tasks] * 2
 
     executed_queries = execute_queries_in_model_predictions(
-        db_executor=db_executor,
-        db_files=db_files,
+        code_executor=db_executor,
+        db_paths=db_files,
         queries=to_be_executed,
         params=None,
-        sql_cache_protocol=cache_db,
+        cached_db=cache_db,
         cache_db_file=cache_db_file,
         timeout=timeout,
     )
@@ -117,7 +118,7 @@ def _execute_sqls(pipeline_tasks: list[PipelineTask], db_executor, cache_db, cac
     ]
 
 
-def _evaluate(pipeline_tasks: list[PipelineTask], evaluator) -> list[PipelineTask]:
+def _evaluate(pipeline_tasks: list[PipelineTask], evaluator, task_type: EvaluationType) -> list[PipelineTask]:
     executed_pred = []
     executed_target = []
     for task in pipeline_tasks:
@@ -126,10 +127,14 @@ def _evaluate(pipeline_tasks: list[PipelineTask], evaluator) -> list[PipelineTas
 
     evaluation_results = evaluate_target_and_pred(
         evaluator,
-        multiple_tasks_preds=executed_pred,
-        multiple_tasks_tars=executed_target
+        targets=executed_target,
+        predictions=executed_pred,
+        task_type=task_type,
     )
-    return [task.model_copy(update={"score": evaluation_results}) for task in pipeline_tasks]
+    return [
+        task.model_copy(update={"score": score})
+        for task, score in zip(pipeline_tasks, evaluation_results)
+    ]
 
 
 def _get_pipeline_nodes(pipeline_args: PipelineArgs):

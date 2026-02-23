@@ -13,3 +13,19 @@ def utils_extract_sql_or_same(generation: str) -> str:
     content = extract_last_match(content, r"```sql\s*(.*?)\s*```")
     content = extract_last_match(content, r"```\s*(.*?)\s*```")
     return content.strip().strip("`").strip()
+
+
+def utils_extract_cypher_or_same(generation: str) -> str:
+    """Parses Cypher from LLM responses, looking for <answer> or code blocks."""
+    content = extract_last_match(generation, r"<answer>(.*?)</answer>")
+    content = extract_last_match(content, r"```cypher\s*(.*?)\s*```")
+    content = extract_last_match(content, r"```\s*(.*?)\s*```")
+    return content.strip().strip("`").strip()
+
+
+def utils_extract_sparql_or_same(generation: str) -> str:
+    """Parses SPARQL from LLM responses, looking for <answer> or code blocks."""
+    content = extract_last_match(generation, r"<answer>(.*?)</answer>")
+    content = extract_last_match(content, r"```sparql\s*(.*?)\s*```")
+    content = extract_last_match(content, r"```\s*(.*?)\s*```")
+    return content.strip().strip("`").strip()

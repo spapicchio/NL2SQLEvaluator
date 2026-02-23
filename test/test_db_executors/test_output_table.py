@@ -24,7 +24,7 @@ class TestSQLOutputTable:
         assert table_a.is_equivalent_to(table_b, is_row_order_important=True) is False
 
     def test_equality_diff_projected_col(self):
-        """Verify that order matters when is_row_order_important is True."""
+        """Verify that different column projections match when unordered."""
         table_a = SQLExecutorOutput(rows=[(None, 1, "A"), ("B", 2)])
         table_b = SQLExecutorOutput(rows=[(2, "B"), ("A", None, 1)])
         assert table_a.is_equivalent_to(table_b, is_row_order_important=False) is True
@@ -37,12 +37,11 @@ class TestSQLOutputTable:
 
     def test_serialization_roundtrip(self):
         """Ensure data integrity through compression and decompression."""
-        original = SQLExecutorOutput(rows=[(1, "Alice"), (2, "Bob")], columns=["id", "name"])
+        original = SQLExecutorOutput(rows=[(1, "Alice"), (2, "Bob")])
         compressed = original.compress()
         decompressed = SQLExecutorOutput.decompress(compressed)
 
         assert decompressed.rows == original.rows
-        assert decompressed.columns == original.columns
 
     def test_invalid_types_validation(self):
         """Ensure Pydantic catches non-hashable types in rows."""
@@ -62,13 +61,12 @@ class TestSQLOutputTableRobustness:
     """Edge-case testing for SQLOutputTable serialization and capacity."""
 
     def test_compress_empty_table(self):
-        """Checks if the system handles empty lists for columns and rows."""
-        table = SQLExecutorOutput(columns=[], rows=[])
+        """Checks if the system handles empty rows."""
+        table = SQLExecutorOutput(rows=[])
         compressed = table.compress()
 
         decompressed = table.decompress(compressed)
         assert decompressed.rows == []
-        assert decompressed.columns == []
 
     def test_compress_large_result_set(self):
         """Stress test with 100,000 rows to check performance and stability.
@@ -80,7 +78,7 @@ class TestSQLOutputTableRobustness:
             (i, "".join(random.choices(string.ascii_letters, k=10)), random.random())
             for i in range(100_000)
         ]
-        table = SQLExecutorOutput(columns=["id", "token", "score"], rows=large_rows)
+        table = SQLExecutorOutput(rows=large_rows)
 
         compressed = table.compress()
 
@@ -94,7 +92,7 @@ class TestSQLOutputTableRobustness:
 
     def test_decompress_invalid_bytes(self):
         """Ensures that passing garbage data to decompress fails gracefully."""
-        table = SQLExecutorOutput(columns=["a"], rows=[(1,)])
+        table = SQLExecutorOutput(rows=[(1,)])
 
         with pytest.raises((zlib.error, pickle.UnpicklingError, EOFError)):  # pyrefly: ignore
             # Passing random non-compressed bytes
@@ -102,7 +100,7 @@ class TestSQLOutputTableRobustness:
 
     def test_decompress_truncated_data(self):
         """Checks behavior when the byte stream is cut short."""
-        table = SQLExecutorOutput(columns=["a"], rows=[(1,)] * 100)
+        table = SQLExecutorOutput(rows=[(1,)] * 100)
         compressed = table.compress()
 
         # Truncate the byte string
