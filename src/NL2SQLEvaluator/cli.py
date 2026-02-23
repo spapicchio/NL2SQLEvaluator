@@ -27,7 +27,12 @@ def run_evaluation(script_args: ScriptArgs, data_args: DatasetArgs, model_args: 
     logger.info("Args: %s", (script_args, data_args, model_args, pipeline_args))
     # read dataset:
     reader = get_node_from_registry('dataset_reader_nodes', pipeline_args.dataset_reader_node)
-    dataset = read_data_from_file(reader, data_args.dataset_path, base_db_path=data_args.relative_db_base_path)
+    dataset = read_data_from_file(
+        reader, data_args.dataset_path,
+        base_db_path=data_args.relative_db_base_path,
+        neo4j_info_path=data_args.neo4j_info_path,
+        sparql_endpoint_url=data_args.sparql_endpoint_url,
+    )
     dataset = dataset[:10]
     if not dataset:
         logger.warning("Empty dataset: %s", data_args.dataset_path)

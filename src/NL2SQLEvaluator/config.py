@@ -52,6 +52,14 @@ class DatasetArgs:
         default='SQL',
         metadata={"help": "Name of the column containing target SQL queries in the dataset"}
     )
+    neo4j_info_path: str | None = field(
+        default=None,
+        metadata={"help": "Path to neo4j_info.json mapping graph names to Neo4j connection details"}
+    )
+    sparql_endpoint_url: str | None = field(
+        default=None,
+        metadata={"help": "SPARQL endpoint URL (e.g. https://query.wikidata.org/sparql)"}
+    )
 
 
 @dataclass
@@ -162,4 +170,9 @@ class PipelineArgs:
         default=None,
         metadata={
             "help": f"Saver node to use for saving evaluation results. Available savers: {get_available_functions('saver_nodes')}"}
+    )
+    evaluation_type: str = field(
+        default="text2sql",
+        metadata={
+            "help": "Evaluation task type: text2sql, text2cypher, text2sparql, ambig_text2sql, unans_text2sql"}
     )

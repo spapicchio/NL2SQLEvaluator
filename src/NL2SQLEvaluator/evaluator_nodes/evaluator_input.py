@@ -3,7 +3,9 @@ from typing import Literal, Any, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput, GenericExecutorOutput
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import (
+    SQLExecutorOutput, CypherExecutorOutput, SparqlExecutorOutput, GenericExecutorOutput
+)
 
 TargetType = TypeVar("TargetType")
 PredType = TypeVar("PredType")
@@ -15,6 +17,7 @@ class EvaluationType(str, Enum):
     AMBIGTEXT2SQL = "ambig_text2sql"
     UNANSTEXT2SQL = "unans_text2sql"
     TEXT2CYPHER = "text2cypher"
+    TEXT2SPARQL = "text2sparql"
 
 
 class GenericOutputTable:
@@ -104,5 +107,50 @@ class EvalUnansText2SQLTask(BaseEvalTask[bool, str]):
     task_type: Literal[EvaluationType.UNANSTEXT2SQL] = EvaluationType.UNANSTEXT2SQL
 
 
-class EvalText2CypherTask(BaseEvalTask[SQLExecutorOutput, list[SQLExecutorOutput]]):
-    pass
+def _graph_majority_vote(predictions, is_row_order_important, is_order_column):
+    """Shared majority voting for graph-based outputs (Cypher/SPARQL).
+
+    Canonicalizes rows by sorting values within each row (column-order invariant)
+    and then comparing frequency of canonical result sets.
+    """
+    def get_canonical_form(pred):
+        canonical_rows = tuple(
+            GenericExecutorOutput.to_hashable(GenericExecutorOutput.unorder_row(row))
+            for row in pred.rows
+        )
+        return tuple(sorted(canonical_rows, key=str)) if not is_row_order_important else canonical_rows
+
+    frequency_map: dict[Any, list] = {}
+    for pred in predictions:
+        canon = get_canonical_form(pred) if is_order_column else tuple(pred.rows)
+        if canon in frequency_map:
+            frequency_map[canon][0] += 1
+        else:
+            frequency_map[canon] = [1, pred]
+
+    best_key = max(frequency_map, key=lambda k: frequency_map[k][0])
+    return frequency_map[best_key][1]
+
+
+class EvalText2CypherTask(BaseEvalTask[CypherExecutorOutput, list[CypherExecutorOutput]]):
+    """Specific task for Text2Cypher evaluation.
+
+    Target is a single CypherExecutorOutput, predictions are a list of CypherExecutorOutput.
+    """
+    task_type: Literal[EvaluationType.TEXT2CYPHER] = EvaluationType.TEXT2CYPHER
+
+    def get_best_pred_by_majority_voting(self, is_row_order_important, is_order_column=True) -> CypherExecutorOutput:
+        """Selects the prediction that appears most frequently based on result rows."""
+        return _graph_majority_vote(self.predictions, is_row_order_important, is_order_column)
+
+
+class EvalText2SparqlTask(BaseEvalTask[SparqlExecutorOutput, list[SparqlExecutorOutput]]):
+    """Specific task for Text2SPARQL evaluation.
+
+    Target is a single SparqlExecutorOutput, predictions are a list of SparqlExecutorOutput.
+    """
+    task_type: Literal[EvaluationType.TEXT2SPARQL] = EvaluationType.TEXT2SPARQL
+
+    def get_best_pred_by_majority_voting(self, is_row_order_important, is_order_column=True) -> SparqlExecutorOutput:
+        """Selects the prediction that appears most frequently based on result rows."""
+        return _graph_majority_vote(self.predictions, is_row_order_important, is_order_column)

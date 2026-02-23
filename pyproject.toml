@@ -22,6 +22,10 @@ dependencies = [
     "pyrefly>=0.52.0",
 ]
 
+[project.optional-dependencies]
+neo4j = ["neo4j>=5.0"]
+sparql = ["SPARQLWrapper>=2.0", "rdflib>=7.0"]
+graph = ["neo4j>=5.0", "SPARQLWrapper>=2.0", "rdflib>=7.0"]
 
 [dependency-groups]
 dev = [

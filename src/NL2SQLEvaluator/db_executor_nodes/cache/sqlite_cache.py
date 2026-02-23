@@ -1,19 +1,31 @@
-"""Module for caching SQL execution results using SQLite.
+"""Module for caching query execution results using SQLite.
 
-This module provides a persistent SQLite-backed cache to store and retrieve 
-SQLOutputTable objects based on a unique hash of the query and database context.
+This module provides a persistent SQLite-backed cache to store and retrieve
+GenericExecutorOutput objects based on a unique hash of the query and database context.
 """
 
 from NL2SQLEvaluator.db_executor_nodes.cache.cache_protocol import (
     NotFoundInCacheError, DataToFetch, DataToCache
 )
 from NL2SQLEvaluator.db_executor_nodes.db_executor_input import TaskToBeExecuted
-from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput, ExecutorError
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import (
+    SQLExecutorOutput, CypherExecutorOutput, SparqlExecutorOutput,
+    GenericExecutorOutput, ExecutorError,
+)
 from NL2SQLEvaluator.db_executor_nodes.sqlite_db_executor import SQLiteDBExecutor
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
 
 logger = get_logger(__name__)
+
+_DIALECT_TO_OUTPUT_CLASS: dict[str, type[GenericExecutorOutput]] = {
+    "sql": SQLExecutorOutput,
+    "sqlite": SQLExecutorOutput,
+    "postgres": SQLExecutorOutput,
+    "cypher": CypherExecutorOutput,
+    "neo4j": CypherExecutorOutput,
+    "sparql": SparqlExecutorOutput,
+}
 
 
 @register_node()
@@ -47,11 +59,12 @@ class SqliteCache:
         task = TaskToBeExecuted(db_path=self.cache_db_path, queries=[sql])
         self.executor.execute_queries([task], allow_write=True)
 
-    def set_in_cache(self, data_to_cache: list[DataToCache]) -> None:
+    def set_in_cache(self, cache_path: str, data_to_cache: list[DataToCache]) -> None:
         """Persists a list of execution results to the cache.
 
         Args:
-            data_to_cache: Objects containing the hash and SQLOutputTable.
+            cache_path: Path to the cache database (unused, instance uses self.cache_db_path).
+            data_to_cache: Objects containing the hash and execution result.
         """
         insert_sql = """
                      INSERT OR IGNORE INTO `cache_data` (hash_key, db_path, query, result)
@@ -78,16 +91,18 @@ class SqliteCache:
 
     def get_from_cache(
             self,
+            cache_path: str,
             data_to_fetch: list[DataToFetch]
-    ) -> list[SQLExecutorOutput | NotFoundInCacheError]:
+    ) -> list[DataToCache | NotFoundInCacheError]:
         """Retrieves results from the cache based on hash_key.
 
         Args:
-            data_to_fetch: Metadata objects containing the hash_key.
+            cache_path: Path to the cache database (unused, instance uses self.cache_db_path).
+            data_to_fetch: Metadata objects containing the hash_key and dialect.
 
         Returns:
             A list where each index corresponds to the input list, containing
-            either the decompressed table or a NotFoundInCacheError.
+            either a DataToCache with the decompressed result or a NotFoundInCacheError.
         """
         select_sql = "SELECT result FROM `cache_data` WHERE hash_key = :hash_key;"
         params = [{"hash_key": d.hash_key} for d in data_to_fetch]
@@ -100,11 +115,17 @@ class SqliteCache:
 
         # Results from execute_queries are nested: [TaskIdx][QueryIdx]
         batch_results = self.executor.execute_queries([task], allow_write=False)[0]
-        final_output = [
-            NotFoundInCacheError(str(ExecutorError))
-            # if the hash key is not present in the database, the query will return an empty list of rows
-            if isinstance(result_rows, ExecutorError) or result_rows.rows == []
-            else SQLExecutorOutput.decompress(result_rows.rows[0][0])
-            for result_rows in batch_results
-        ]
+        final_output: list[DataToCache | NotFoundInCacheError] = []
+        for i, result_rows in enumerate(batch_results):
+            if isinstance(result_rows, ExecutorError) or result_rows.rows == []:
+                final_output.append(NotFoundInCacheError(f"Cache miss for hash {data_to_fetch[i].hash_key}"))
+            else:
+                output_class = _DIALECT_TO_OUTPUT_CLASS.get(data_to_fetch[i].dialect, SQLExecutorOutput)
+                result = output_class.decompress(result_rows.rows[0][0])
+                final_output.append(DataToCache(
+                    db_path=data_to_fetch[i].db_path,
+                    query=data_to_fetch[i].query,
+                    dialect=data_to_fetch[i].dialect,
+                    result=result,
+                ))
         return final_output
