@@ -1,6 +1,6 @@
 import pytest
 from NL2SQLEvaluator.db_executor_nodes.db_executor_output import SQLExecutorOutput
-from NL2SQLEvaluator.evaluator_nodes.ambig_text2sql_evaluators import AmbigText2SQLEvaluator
+from NL2SQLEvaluator.evaluator_nodes.text2sql_evaluators.ambig_text2sql_evaluators import AmbigText2SQLEvaluator
 from NL2SQLEvaluator.evaluator_nodes.evaluator_input import EvalAmbigText2SQLTask
 
 

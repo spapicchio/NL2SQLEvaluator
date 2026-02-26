@@ -1,1 +1,0 @@
-from NL2SQLEvaluator.evaluator_nodes.ambig_text2sql_evaluators.ambigtext2sql import AmbigText2SQLEvaluator
