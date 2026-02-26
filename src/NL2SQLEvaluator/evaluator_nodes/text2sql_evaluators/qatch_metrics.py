@@ -22,7 +22,7 @@ class QATCHMetric(Enum):
     F1_SCORE = "f1_score"
 
 
-@register_node(package_name='text2sql_evaluators')
+@register_node(package_name='evaluator_nodes')
 class QATCHEvaluator:
     """Evaluator for QATCH metrics with a dispatch-based architecture.
 

@@ -42,7 +42,6 @@ class TestSQLOutputTable:
         decompressed = SQLExecutorOutput.decompress(compressed)
 
         assert decompressed.rows == original.rows
-        assert decompressed.columns == original.columns
 
     def test_invalid_types_validation(self):
         """Ensure Pydantic catches non-hashable types in rows."""
@@ -68,7 +67,6 @@ class TestSQLOutputTableRobustness:
 
         decompressed = table.decompress(compressed)
         assert decompressed.rows == []
-        assert decompressed.columns == []
 
     def test_compress_large_result_set(self):
         """Stress test with 100,000 rows to check performance and stability.

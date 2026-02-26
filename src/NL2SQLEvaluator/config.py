@@ -36,7 +36,7 @@ class DatasetArgs:
         default="data/omnisql/data/bird/train/train_databases",
         metadata={"help": "Relative path to the database files directory"}
     )
-    pred_col_name: str = field(
+    pred_col_name: str | None = field(
         default=None,
         metadata={"help": "Name of the column containing predictions in the dataset"}
     )
@@ -162,4 +162,8 @@ class PipelineArgs:
         default=None,
         metadata={
             "help": f"Saver node to use for saving evaluation results. Available savers: {get_available_functions('saver_nodes')}"}
+    )
+    evaluation_type: str = field(
+        default="text2sql",
+        metadata={"help": "Evaluation task type. One of: text2sql, ambig_text2sql, unans_text2sql, text2cypher"}
     )

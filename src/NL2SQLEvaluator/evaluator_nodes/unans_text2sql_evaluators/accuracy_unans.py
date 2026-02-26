@@ -5,7 +5,7 @@ from NL2SQLEvaluator.node_registry import register_node
 logger = get_logger(__name__)
 
 
-@register_node(package_name='unans_text2sql_evaluators')
+@register_node(package_name='evaluator_nodes')
 class UnansAccuracyEvaluator:
     def execute_metric(
             self,

@@ -5,7 +5,7 @@ from NL2SQLEvaluator.evaluator_nodes.text2sql_evaluators.qatch_metrics import QA
 from NL2SQLEvaluator.node_registry import register_node
 
 
-@register_node(package_name="ambigtext2sql")
+@register_node(package_name='evaluator_nodes')
 class AmbigText2SQLEvaluator:
     """Evaluator for Ambiguous Text2SQL tasks using bipartite matching."""
 

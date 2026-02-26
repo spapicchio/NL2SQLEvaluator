@@ -1,11 +1,11 @@
 from typing import Protocol
 
-from NL2SQLEvaluator.db_executor_nodes.db_executor_output import GenericExecutorOutput
+from NL2SQLEvaluator.db_executor_nodes.db_executor_output import GenericExecutorOutput, ExecutorError
 from NL2SQLEvaluator.evaluator_nodes.evaluator_input import BaseEvalTask, EvaluationType
 from NL2SQLEvaluator.evaluator_nodes.factory_evaluator import FactoryTaskEvaluator
 
-TargetType = int | GenericExecutorOutput | list[GenericExecutorOutput]
-PredType = str | list[GenericExecutorOutput]
+TargetType = int | GenericExecutorOutput | list[GenericExecutorOutput] | ExecutorError
+PredType = str | list[GenericExecutorOutput | ExecutorError] | None
 
 
 class EvaluatorProtocol(Protocol):

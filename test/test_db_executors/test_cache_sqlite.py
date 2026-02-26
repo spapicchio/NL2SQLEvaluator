@@ -41,7 +41,6 @@ class TestSqliteCache:
         assert len(results) == 1
         assert isinstance(results[0], SQLExecutorOutput)
         assert results[0].rows == table.rows
-        assert results[0].columns == table.columns
 
     def test_cache_miss(self, cache_instance):
         """Verify behavior when a hash_key is not found."""

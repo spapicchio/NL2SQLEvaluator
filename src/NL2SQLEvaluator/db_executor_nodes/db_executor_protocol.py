@@ -50,7 +50,6 @@ def execute_queries_in_model_predictions(
         queries: list[list[str]],
         params: list[list[dict]] | None = None,
         cached_db: SQLCacheProtocol[T] | None = None,
-        cache_db_file: str | None = None,
         **kwargs: Any
 ) -> list[list[T | ExecutorError]]:
     """Groups SQL predictions by database path to optimize execution.
@@ -128,7 +127,6 @@ def execute_queries_in_model_predictions(
     all_results = code_executor.execute_queries(
         tasks=tasks,
         cache_db=cached_db,
-        cache_db_file=cache_db_file
     )
 
     # Initialize final_output with the correct size using the input count

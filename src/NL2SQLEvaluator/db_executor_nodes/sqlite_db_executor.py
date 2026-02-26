@@ -29,7 +29,6 @@ class SQLiteDBExecutor:
             tasks: List[TaskToBeExecuted],
             allow_write: bool = False,
             cache_db: Optional[SQLCacheProtocol[SQLExecutorOutput]] = None,
-            cache_db_file: Optional[str] = None,
             **kwargs
     ) -> list[list[SQLExecutorOutput | ExecutorError]]:
         """Executes SQL tasks. Checks cache first, then runs misses in parallel."""
@@ -43,8 +42,8 @@ class SQLiteDBExecutor:
             for q_idx, query in enumerate(task.queries):
                 # Handle param indexing
                 params = task.params[q_idx] if isinstance(task.params, list) else task.params
-                if cache_db and cache_db_file:
-                    cached = self._check_cache(cache_db, cache_db_file, task.db_path, query)
+                if cache_db:
+                    cached = self._check_cache(cache_db, task.db_path, query)
                     if cached is not None:
                         results[j_id][q_idx] = cached
                         continue
@@ -68,13 +67,12 @@ class SQLiteDBExecutor:
 
     def _check_cache(self,
                      cache_db: SQLCacheProtocol[SQLExecutorOutput],
-                     cache_path: str,
                      db_path: str,
                      query: str) -> SQLExecutorOutput | None:
         """Internal helper to safely probe the cache."""
         db_id = Path(db_path).stem
         fetch_req = DataToFetch(db_path=db_id, query=query)
-        cache_res = cache_db.get_from_cache(cache_path, [fetch_req])[0]
+        cache_res = cache_db.get_from_cache([fetch_req])[0]
         if not isinstance(cache_res, NotFoundInCacheError):
             return cache_res.result
         return None

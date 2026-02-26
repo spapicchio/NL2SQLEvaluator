@@ -31,6 +31,10 @@ class ChatTurn(BaseModel):
     content: str
 
 
+# A conversation is a sequence of turns (matches HuggingFace chat format)
+ChatMessageHF = list[ChatTurn]
+
+
 class DataInput(BaseModel):
     """The mandatory schema for all evaluator inputs."""
     model_config = ConfigDict(extra='allow')

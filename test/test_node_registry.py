@@ -18,8 +18,14 @@ class TestNodeRegistry:
     """
 
     def setup_method(self):
-        """Clear the global registry before each test to ensure isolation."""
+        """Snapshot and clear the global registry before each test to ensure isolation."""
+        self._saved_registry = {k: dict(v) for k, v in _registry.items()}
         _registry.clear()
+
+    def teardown_method(self):
+        """Restore the global registry after each test."""
+        _registry.clear()
+        _registry.update(self._saved_registry)
 
     def test_register_and_get_function(self):
         """Tests if a basic function can be registered and retrieved."""

@@ -96,13 +96,12 @@ class SQLCacheProtocol(Protocol[T]):
     Why: Decouples storage logic (SQLite, Redis) from the execution pipeline.
     """
 
-    def set_in_cache(self, cache_path: str, data_to_cache: list[DataToCache[T]]) -> None:
+    def set_in_cache(self, data_to_cache: list[DataToCache[T]]) -> None:
         """Persists a list of results to the cache backend."""
         ...
 
     def get_from_cache(
             self,
-            cache_path: str,
             data_to_fetch: list[DataToFetch]
     ) -> list[DataToCache[T] | NotFoundInCacheError]:
         """Retrieves results, returning DataToCache[T] for hits or Error for misses."""
