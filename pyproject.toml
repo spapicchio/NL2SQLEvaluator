@@ -20,6 +20,9 @@ dependencies = [
     "typer>=0.20.0",
     "typer-config[all]>=1.4.2",
     "pyrefly>=0.52.0",
+    "vllm>=0.10.2",
+    "pytest>=8.4.2",
+    "litellm>=1.78.6",
 ]
 
 

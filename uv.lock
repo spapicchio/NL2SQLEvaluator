@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = "==3.12.*"
 resolution-markers = [
     "sys_platform == 'linux'",
@@ -1159,16 +1159,19 @@ dependencies = [
     { name = "datasets" },
     { name = "fastparquet" },
     { name = "func-timeout" },
+    { name = "litellm" },
     { name = "loguru" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "pyrefly" },
+    { name = "pytest" },
     { name = "python-dotenv" },
     { name = "sqlglot" },
     { name = "tqdm" },
     { name = "typer" },
     { name = "typer-config", extra = ["all"] },
+    { name = "vllm" },
     { name = "wandb" },
 ]
 
@@ -1191,16 +1194,19 @@ requires-dist = [
     { name = "datasets", specifier = ">=4.0.0" },
     { name = "fastparquet", specifier = ">=2024.11.0" },
     { name = "func-timeout", specifier = ">=4.3.5" },
+    { name = "litellm", specifier = ">=1.78.6" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "pandas", specifier = ">=2.3.2" },
     { name = "pyarrow", specifier = ">=21.0.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pyrefly", specifier = ">=0.52.0" },
+    { name = "pytest", specifier = ">=8.4.2" },
     { name = "python-dotenv", specifier = ">=1.1.1" },
     { name = "sqlglot", specifier = ">=27.11.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "typer", specifier = ">=0.20.0" },
     { name = "typer-config", extras = ["all"], specifier = ">=1.4.2" },
+    { name = "vllm", specifier = ">=0.10.2" },
     { name = "wandb", specifier = ">=0.21.3" },
 ]
 
