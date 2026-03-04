@@ -22,6 +22,7 @@ class VLLMPredictor:
         dp = kwargs.get('data_parallel_size', 1)
         reasoning_effort = kwargs.get('reasoning_effort', None)
         max_model_len = kwargs.get('max_model_len', 8128)
+        # max_model_len = kwargs.get('max_model_len', None)  change to None to use vLLM's default max model length for the specified model
         logger.info(f'Loading model {model_name} with tp={tp}, dp={dp}, max_model_len={max_model_len}.')
         llm = self._load_model(model_name, tp, dp, max_model_len)
         tokenizer = self._load_tokenizer(model_name)
