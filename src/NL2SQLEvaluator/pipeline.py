@@ -151,8 +151,21 @@ def _get_predictions(tasks: list[PipelineTask], predictor, model_args: ModelArgs
         model_name=model_args.model_name_or_path,
         multiple_tasks_messages=input_seqs,
         model_args=model_args,
-    )
-    return [task.model_copy(update={"pred_sqls": predictions[i]}) for i, task in enumerate(tasks)]
+    ) # Now generate_predictions returns list[list[PredictionResult]]
+
+    # return [task.model_copy(update={"pred_sqls": predictions[i]}) for i, task in enumerate(tasks)]
+    updated_tasks = []
+    """Extract parsed SQL if available, otherwise fallback to raw prediction text"""
+    for i, task in enumerate(tasks):
+        sqls_for_task = [
+            result.parsed_prediction if result.parsed_prediction is not None else result.raw_prediction 
+            for result in predictions[i]
+        ]
+        
+        """Update with list of strings for pred_sqls"""
+        updated_tasks.append(task.model_copy(update={"pred_sqls": sqls_for_task}))
+        
+    return updated_tasks
 
 
 def _execute_sqls(
