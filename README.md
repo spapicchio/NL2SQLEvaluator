@@ -1,5 +1,8 @@
 # NL2SQLEvaluator
 
+# WIP
+- Add module for inference 
+
 # Roadmap
 - [ ] Add MySQL database executor 
 - [ ] Add Precision, Recall, F1 metrics for ambiguity Text2SQL datasets

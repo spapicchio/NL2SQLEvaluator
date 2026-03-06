@@ -5,6 +5,17 @@ from vllm import SamplingParams
 from NL2SQLEvaluator.config import ModelArgs
 from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
 
+from NL2SQLEvaluator.predictor_nodes.predictor_output import PredictionResult
+
+
+# class PredictorProtocol(Protocol):
+#     def infer(self,
+#               model_name: str,
+#               multiple_tasks_messages: list[ChatMessageHF],
+#               sampling_params: SamplingParams,
+#               *args,
+#               **kwargs) -> list[list[str]]:
+#         ...
 
 class PredictorProtocol(Protocol):
     def infer(self,
@@ -12,7 +23,7 @@ class PredictorProtocol(Protocol):
               multiple_tasks_messages: list[ChatMessageHF],
               sampling_params: SamplingParams,
               *args,
-              **kwargs) -> list[list[str]]:
+              **kwargs) -> list[list[PredictionResult]]:
         ...
 
 
@@ -21,7 +32,7 @@ def generate_predictions(predictor: PredictorProtocol,
                          multiple_tasks_messages: list[ChatMessageHF],
                          model_args: ModelArgs,
                          *args,
-                         **kwargs) -> list[list[str]]:
+                         **kwargs) -> list[list[PredictionResult]]: # list[list[str]]:
     sampling_params = create_sampling_params(model_args)
     return predictor.infer(
         model_name=model_name,
@@ -30,7 +41,6 @@ def generate_predictions(predictor: PredictorProtocol,
         *args,
         **kwargs
     )
-
 
 def create_sampling_params(model_args: ModelArgs) -> SamplingParams:
     return SamplingParams(

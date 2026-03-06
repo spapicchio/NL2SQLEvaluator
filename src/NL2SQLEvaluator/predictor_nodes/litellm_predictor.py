@@ -3,10 +3,14 @@ import time
 import requests
 from litellm.types.utils import ModelResponse
 from vllm import SamplingParams
+from typing import Any
 
 from NL2SQLEvaluator.dataset_reader_nodes.data_reader_protocol import ChatMessageHF
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
+
+from NL2SQLEvaluator.predictor_nodes.predictor_output import PredictionResult
+
 
 logger = get_logger(__name__)
 
@@ -47,7 +51,7 @@ class LiteLLMPredictor:
               multiple_tasks_messages: list[ChatMessageHF],
               sampling_params: SamplingParams,
               *args,
-              **kwargs) -> list[list[str]]:
+              **kwargs) -> list[list[PredictionResult]]: # list[list[str]]:
         import litellm
         # litellm._turn_on_debug()
         litellm.request_timeout = 6000  # increase request timeout to 6000 seconds
@@ -78,27 +82,58 @@ class LiteLLMPredictor:
             max_workers=8,
         )
 
-        parsed_responses = self.parse_model_output(model_answer)
+        parsed_responses = self.parse_model_output(model_name, model_answer)
         return parsed_responses
-
+    
     def parse_model_output(
-            self, model_answer: list[ModelResponse]
-    ) -> list[list[str]]:
+                self, model_name: str, model_answer: list[Any]
+        ) -> list[list[PredictionResult]]: 
 
-        parsed_response: list[list[str]] = []
-        for out in model_answer:
-            if not isinstance(out, ModelResponse):
+            parsed_response: list[list[PredictionResult]] = []
+            
+            for out in model_answer:
                 if isinstance(out, BaseException):
                     raise out
-                ValueError(f'The output is not of type ModelResponse but type {type(out)}: {out}')
+                
+                usage = getattr(out, 'usage', None)
+                prompt_tokens = usage.prompt_tokens if usage else None
+                completion_tokens = usage.completion_tokens if usage else None
+                total_tokens = usage.total_tokens if usage else None
 
-            choices_response = [choice['message']['content'] for choice in out['choices']]
+                completions: list[PredictionResult] = []
+                choices = getattr(out, 'choices', [])
+                
+                for choice in choices:
+                    completions.append(
+                        PredictionResult(
+                            raw_prediction=choice.message.content,
+                            finish_reason=getattr(choice, 'finish_reason', None),
+                            prompt_tokens=prompt_tokens,
+                            completion_tokens=completion_tokens,
+                            total_tokens=total_tokens,
+                            model=model_name
+                        )
+                    )
+                parsed_response.append(completions)
 
-            parsed_response.append(choices_response)
+            return parsed_response
 
-        parsed_response = [
-            response
-            for response in parsed_response
-        ]
+# def parse_model_output(
+#             self, model_answer: list[ModelResponse]
+#     ) -> list[list[str]]:
 
-        return parsed_response
+#         parsed_response: list[list[str]] = []
+#         for out in model_answer:
+#             if not isinstance(out, ModelResponse):
+#                 if isinstance(out, BaseException):
+#                     raise out
+#                 ValueError(f'The output is not of type ModelResponse but type {type(out)}: {out}')
+
+#             choices_response = [choice['message']['content'] for choice in out['choices']]
+
+#             parsed_response.append(choices_response)
+
+#         parsed_response = [
+#             response
+#             for response in parsed_response
+#         ]
