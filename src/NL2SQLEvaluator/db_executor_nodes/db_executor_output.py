@@ -25,13 +25,9 @@ class ExecutorError(Exception):
 class GenericExecutorOutput(BaseModel, ABC):
     """Abstract base class representing a standardized database result set.
 
-    Subclasses must implement ``is_equivalent_to`` with language-specific
-    comparison semantics (e.g., SQL uses row-value sorting, graph languages
-    use column-permutation backtracking).
-
-    Shared logic for caching (compress/decompress) and container access is
-    provided here. Subclasses that store non-primitive types should override
-    ``compress`` to normalize before serialization.
+    Subclasses must implement:
+      - ``is_equivalent_to``: language-specific comparison semantics
+      - ``compress`` / ``decompress``: serialization (normalize types before caching)
 
     Attributes:
         rows: A list of tuples containing the result data.
@@ -51,15 +47,16 @@ class GenericExecutorOutput(BaseModel, ABC):
 
     # ── Serialization ───────────────────────────────────────────────
 
+    @abstractmethod
     def compress(self, *args, **kwargs) -> bytes:
-        """Compress the result using zlib + pickle for cache storage."""
-        return zlib.compress(pickle.dumps(self.model_dump()))
+        """Compress the result to save space in cache."""
+        ...
 
-    @classmethod
-    def decompress(cls, compressed_data: bytes, *args, **kwargs) -> Self:
-        """Reconstruct an instance from compressed bytes."""
-        state = pickle.loads(zlib.decompress(compressed_data))
-        return cls(**state)
+    @staticmethod
+    @abstractmethod
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'GenericExecutorOutput':
+        """Decompress the result from the internal compressed_data buffer."""
+        ...
 
     # ── Utility ─────────────────────────────────────────────────────
 
@@ -249,6 +246,16 @@ class SQLExecutorOutput(GenericExecutorOutput):
 
         return Counter(sorted_rows) == Counter(sorted_other_rows)
 
+    @override
+    def compress(self, *args, **kwargs) -> bytes:
+        return zlib.compress(pickle.dumps(self.model_dump()))
+
+    @staticmethod
+    @override
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'SQLExecutorOutput':
+        state = pickle.loads(zlib.decompress(compressed_data))
+        return SQLExecutorOutput(**state)
+
     @staticmethod
     def universal_sort_key(x: Any) -> tuple[int, Any]:
         """Provides a sort key to handle mixed types (None, int, str).
@@ -316,6 +323,12 @@ class CypherExecutorOutput(GenericExecutorOutput):
         return zlib.compress(pickle.dumps(state))
 
     @staticmethod
+    @override
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'CypherExecutorOutput':
+        state = pickle.loads(zlib.decompress(compressed_data))
+        return CypherExecutorOutput(**state)
+
+    @staticmethod
     def _to_primitive(val: Any) -> Any:
         """Recursively convert Neo4j/complex types to hashable primitives."""
         try:
@@ -370,6 +383,12 @@ class SparqlExecutorOutput(GenericExecutorOutput):
             for row in self.rows
         ]
         return zlib.compress(pickle.dumps(state))
+
+    @staticmethod
+    @override
+    def decompress(compressed_data: bytes, *args, **kwargs) -> 'SparqlExecutorOutput':
+        state = pickle.loads(zlib.decompress(compressed_data))
+        return SparqlExecutorOutput(**state)
 
     @staticmethod
     def _to_primitive(val: Any) -> Any:
