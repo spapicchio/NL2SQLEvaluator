@@ -1,21 +1,21 @@
-from NL2SQLEvaluator.evaluator_nodes.evaluator_input import EvalText2SQLTask
+from NL2SQLEvaluator.evaluator_nodes.evaluator_input import EvalText2SparqlTask
 from NL2SQLEvaluator.logger import get_logger
 from NL2SQLEvaluator.node_registry import register_node
 
 logger = get_logger(__name__)
 
 
-@register_node(package_name='text2sql_evaluators')
-class EXEvaluator:
-    """Execution accuracy evaluator for Text2SQL tasks.
+@register_node(package_name='text2sparql_evaluators')
+class SparqlEXEvaluator:
+    """Execution accuracy evaluator for Text2SPARQL tasks.
 
-    Delegates comparison to ``SQLExecutorOutput.is_equivalent_to``,
-    which handles row-value sorting automatically.
+    Delegates comparison to ``SparqlExecutorOutput.is_equivalent_to``,
+    which handles column-permutation backtracking automatically.
     """
 
     def execute_metric(
             self,
-            tasks: list[EvalText2SQLTask],
+            tasks: list[EvalText2SparqlTask],
             *args,
             **kwargs
     ) -> list[float]:
@@ -23,7 +23,7 @@ class EXEvaluator:
         results = [self._ex(task, is_row_order_important) for task in tasks]
         return results
 
-    def _ex(self, task: EvalText2SQLTask, is_row_order_important: bool) -> float:
+    def _ex(self, task: EvalText2SparqlTask, is_row_order_important: bool) -> float:
         if len(task.predictions) == 0:
             logger.warning('No predictions provided for EX evaluation, returning 0.0')
             return 0.0

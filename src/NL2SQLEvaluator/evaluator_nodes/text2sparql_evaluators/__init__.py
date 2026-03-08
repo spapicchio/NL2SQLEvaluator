@@ -1,0 +1,1 @@
+from NL2SQLEvaluator.evaluator_nodes.text2sparql_evaluators.ex_evaluator import SparqlEXEvaluator

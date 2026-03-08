@@ -6,7 +6,7 @@ Cypher, and SPARQL queries always return a uniform GenericOutputTable.
 
 import pickle
 import zlib
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from typing import Self, Any, Optional, override
 
@@ -25,11 +25,13 @@ class ExecutorError(Exception):
 class GenericExecutorOutput(BaseModel, ABC):
     """Abstract base class representing a standardized database result set.
 
-    Provides shared logic for caching (compress/decompress), comparison
-    (multiset with column-permutation support), and container access.
+    Subclasses must implement ``is_equivalent_to`` with language-specific
+    comparison semantics (e.g., SQL uses row-value sorting, graph languages
+    use column-permutation backtracking).
 
-    Subclasses must implement a model_validator to normalize language-specific
-    types (e.g., Neo4j Date → str, rdflib URIRef → str).
+    Shared logic for caching (compress/decompress) and container access is
+    provided here. Subclasses that store non-primitive types should override
+    ``compress`` to normalize before serialization.
 
     Attributes:
         rows: A list of tuples containing the result data.
@@ -42,51 +44,10 @@ class GenericExecutorOutput(BaseModel, ABC):
 
     # ── Comparison ──────────────────────────────────────────────────
 
+    @abstractmethod
     def is_equivalent_to(self, other: 'GenericExecutorOutput', *args, **kwargs) -> bool:
-        """Compare two result sets as multisets with column-permutation support.
-
-        Uses signature-constrained backtracking instead of brute-force O(n!)
-        permutations: columns are grouped by their value distribution, and only
-        columns with identical distributions are permuted against each other.
-
-        Subclasses may override for language-specific semantics (e.g.,
-        SQLExecutorOutput uses row-value sorting without column permutation).
-
-        Args:
-            other: The other result to compare against.
-            **kwargs:
-                is_row_order_important (bool): If True, row order matters. Defaults to False.
-        """
-        is_row_order_important = kwargs.get('is_row_order_important', False)
-
-        if not isinstance(other, type(self)):
-            logger.warning('Comparison between different output table types. Returning False.')
-            return False
-
-        if len(self.rows) != len(other.rows):
-            return False
-
-        if not self.rows:
-            return True
-
-        num_cols = len(self.rows[0])
-        if num_cols != len(other.rows[0]):
-            return False
-
-        for perm in self._valid_column_mappings(self.rows, other.rows, num_cols):
-            permuted_other = [tuple(row[i] for i in perm) for row in other.rows]
-
-            self_h = [self.to_hashable(row) for row in self.rows]
-            other_h = [self.to_hashable(row) for row in permuted_other]
-
-            if is_row_order_important:
-                if self_h == other_h:
-                    return True
-            else:
-                if Counter(self_h) == Counter(other_h):
-                    return True
-
-        return False
+        """Compare two result sets based on language-specific rules."""
+        ...
 
     # ── Serialization ───────────────────────────────────────────────
 
@@ -115,13 +76,41 @@ class GenericExecutorOutput(BaseModel, ABC):
         return val
 
     @staticmethod
-    def unorder_row(row: tuple) -> tuple:
-        """Sort values within a row for permutation-invariant canonicalization.
+    def _compare_rows_with_column_permutation(
+            self_rows: list[tuple],
+            other_rows: list[tuple],
+            is_row_order_important: bool = False,
+    ) -> bool:
+        """Compare two row lists as multisets with column-permutation support.
 
-        Used by majority voting to canonicalize rows independently of column order.
-        NOT used by is_equivalent_to (which does proper column permutation instead).
+        Uses signature-constrained backtracking instead of brute-force O(n!)
+        permutations: columns are grouped by their value distribution, and only
+        columns with identical distributions are permuted against each other.
         """
-        return tuple(sorted(row, key=lambda x: str(GenericExecutorOutput.to_hashable(x))))
+        if len(self_rows) != len(other_rows):
+            return False
+
+        if not self_rows:
+            return True
+
+        num_cols = len(self_rows[0])
+        if num_cols != len(other_rows[0]):
+            return False
+
+        for perm in GenericExecutorOutput._valid_column_mappings(self_rows, other_rows, num_cols):
+            permuted_other = [tuple(row[i] for i in perm) for row in other_rows]
+
+            self_h = [GenericExecutorOutput.to_hashable(row) for row in self_rows]
+            other_h = [GenericExecutorOutput.to_hashable(row) for row in permuted_other]
+
+            if is_row_order_important:
+                if self_h == other_h:
+                    return True
+            else:
+                if Counter(self_h) == Counter(other_h):
+                    return True
+
+        return False
 
     @staticmethod
     def _valid_column_mappings(self_rows, other_rows, num_cols):
@@ -295,16 +284,36 @@ class CypherExecutorOutput(GenericExecutorOutput):
 
     Neo4j returns records as list[dict]. During construction, each dict is sorted
     by key alphabetically and values are extracted as a tuple. Complex Neo4j types
-    (Date, DateTime, nested lists/dicts) are recursively converted to hashable primitives.
-
-    Inherits column-permutation comparison from GenericExecutorOutput.
+    (Date, DateTime, nested lists/dicts) are recursively converted to hashable
+    primitives during comparison and serialization (not on construction, so that
+    the raw result is preserved until needed).
     """
 
-    @model_validator(mode='after')
-    def normalize_neo4j_types(self) -> Self:
-        """Recursively converts Neo4j-specific types to hashable primitives."""
-        self.rows = [tuple(self._to_primitive(v) for v in row) for row in self.rows]
-        return self
+    @override
+    def is_equivalent_to(self, other: 'GenericExecutorOutput', *args, **kwargs) -> bool:
+        """Compare Cypher results using column-permutation backtracking.
+
+        Normalizes Neo4j-specific types to primitives before comparison.
+        """
+        is_row_order_important = kwargs.get('is_row_order_important', False)
+
+        if not isinstance(other, CypherExecutorOutput):
+            logger.warning('Comparison between different output table types. Returning False.')
+            return False
+
+        self_rows = [tuple(self._to_primitive(v) for v in row) for row in self.rows]
+        other_rows = [tuple(self._to_primitive(v) for v in row) for row in other.rows]
+        return self._compare_rows_with_column_permutation(self_rows, other_rows, is_row_order_important)
+
+    @override
+    def compress(self, *args, **kwargs) -> bytes:
+        """Normalize Neo4j types to primitives before compressing."""
+        state = self.model_dump()
+        state['rows'] = [
+            [self._to_primitive(v) for v in row]
+            for row in self.rows
+        ]
+        return zlib.compress(pickle.dumps(state))
 
     @staticmethod
     def _to_primitive(val: Any) -> Any:
@@ -331,16 +340,36 @@ class SparqlExecutorOutput(GenericExecutorOutput):
 
     SPARQL SELECT returns bindings as list[dict]. During construction, each binding
     dict is sorted by key and values are extracted as a tuple. RDF types (URIs,
-    typed literals) are converted to native Python primitives.
-
-    Inherits column-permutation comparison from GenericExecutorOutput.
+    typed literals) are converted to native Python primitives during comparison
+    and serialization (not on construction, so that the raw result is preserved
+    until needed).
     """
 
-    @model_validator(mode='after')
-    def normalize_rdf_types(self) -> Self:
-        """Convert RDF types to hashable primitives."""
-        self.rows = [tuple(self._to_primitive(v) for v in row) for row in self.rows]
-        return self
+    @override
+    def is_equivalent_to(self, other: 'GenericExecutorOutput', *args, **kwargs) -> bool:
+        """Compare SPARQL results using column-permutation backtracking.
+
+        Normalizes RDF-specific types to primitives before comparison.
+        """
+        is_row_order_important = kwargs.get('is_row_order_important', False)
+
+        if not isinstance(other, SparqlExecutorOutput):
+            logger.warning('Comparison between different output table types. Returning False.')
+            return False
+
+        self_rows = [tuple(self._to_primitive(v) for v in row) for row in self.rows]
+        other_rows = [tuple(self._to_primitive(v) for v in row) for row in other.rows]
+        return self._compare_rows_with_column_permutation(self_rows, other_rows, is_row_order_important)
+
+    @override
+    def compress(self, *args, **kwargs) -> bytes:
+        """Normalize RDF types to primitives before compressing."""
+        state = self.model_dump()
+        state['rows'] = [
+            [self._to_primitive(v) for v in row]
+            for row in self.rows
+        ]
+        return zlib.compress(pickle.dumps(state))
 
     @staticmethod
     def _to_primitive(val: Any) -> Any:

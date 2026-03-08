@@ -113,9 +113,13 @@ def _graph_majority_vote(predictions, is_row_order_important, is_order_column):
     Canonicalizes rows by sorting values within each row (column-order invariant)
     and then comparing frequency of canonical result sets.
     """
+    def _unorder_row(row: tuple) -> tuple:
+        """Sort values within a row for column-order-invariant canonicalization."""
+        return tuple(sorted(row, key=lambda x: str(GenericExecutorOutput.to_hashable(x))))
+
     def get_canonical_form(pred):
         canonical_rows = tuple(
-            GenericExecutorOutput.to_hashable(GenericExecutorOutput.unorder_row(row))
+            GenericExecutorOutput.to_hashable(_unorder_row(row))
             for row in pred.rows
         )
         return tuple(sorted(canonical_rows, key=str)) if not is_row_order_important else canonical_rows
